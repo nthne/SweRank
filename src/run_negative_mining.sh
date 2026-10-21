@@ -1,22 +1,14 @@
-#!/bin/bash
-
-set -e
-
-PR_DATASET="collect/datasets/SWE_PRS_FT_DATASET.jsonl"
-premined_data_name="repo_contrastive_premined.jsonl"
-mined_data_name="repo_contrastive_mined.jsonl"
-
-# Extract functions from the corresponding codebases
-python get_train_by_repo.py \
-    --data_path $PR_DATASET \
-    --save_file_name $premined_data_name
-
-# Negative mining
-python repo_negative_mining.py \
-    --data_path ${premined_data_name} \
-    --num_workers_per_gpu 1 \
-    --save_file_name ${mined_data_name}
-
-# Quality filtering (consistency + hard negatives filtering)
-python collect/filter_dataset.py \
-    --file_path ${mined_data_name} \
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+RAW="collect/datasets/SWE_PRS_FT_DATASET.jsonl"
+if [[ ! -f "$RAW" ]]; then
+  echo "Missing $RAW; run src/collect/collect_data.sh first" >&2
+  exit 1
+fi
+python get_train_by_repo.py --data_path "$RAW" --save_file_name repo_contrastive_premined.jsonl
+python repo_negative_mining.py --data_path repo_contrastive_premined.jsonl \
+ --num_workers_per_gpu 1 --save_file_name repo_contrastive_mined.jsonl
+python collect/filter_dataset.py --file_path "$SCRIPT_DIR"
+echo "Preserved raw/premined/mined and filtered records in $SCRIPT_DIR"

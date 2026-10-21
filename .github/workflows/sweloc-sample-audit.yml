@@ -1,0 +1,43 @@
+name: SWELOC sample audit
+on:
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Public GitHub repository (owner/name)
+        required: true
+        default: pallets/flask
+      max_prs:
+        description: Max recent eligible merged PRs
+        required: true
+        default: '12'
+  push:
+    paths:
+      - src/collect/sample_sweloc.py
+      - tests/test_sample_sweloc.py
+      - .github/workflows/sweloc-sample-audit.yml
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Collect mini audit
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ inputs.repo || 'pallets/flask' }}
+          MAX_PRS: ${{ inputs.max_prs || '12' }}
+        run: python src/collect/sample_sweloc.py --repo "$REPO" --max-prs "$MAX_PRS" --output-dir audit_outputs
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sweloc-mini-audit
+          path: audit_outputs/
+          if-no-files-found: warn
