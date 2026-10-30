@@ -3,21 +3,17 @@ on:
   workflow_dispatch:
     inputs:
       repo:
-        description: Public GitHub repository (owner/name)
+        description: Public repo owner/name
         required: true
         default: pallets/flask
       max_prs:
-        description: Max recent eligible merged PRs (1-30)
+        description: Max merged linked PRs
         required: true
-        default: '12'
+        default: '4'
   push:
     paths:
-      - src/collect/sample_sweloc.py
+      - src/collect/enrich_sweloc.py
       - src/collect/group_issues.py
-      - src/collect/build_gold_subgraph.py
-      - tests/test_sample_sweloc.py
-      - tests/test_group_issues.py
-      - tests/test_gold_subgraph.py
       - .github/workflows/sweloc-sample-audit.yml
 permissions:
   contents: write
@@ -28,79 +24,69 @@ jobs:
   audit:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      TARGET_REPO: ${{ inputs.repo || 'pallets/flask' }}
+      MAX_PRS: ${{ inputs.max_prs || '4' }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          persist-credentials: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Unit tests
         run: python -m unittest discover -s tests -v
-      - name: Validate run scope
-        env:
-          MAX_PRS: ${{ inputs.max_prs || '12' }}
+      - name: Crawl issue and PR
         run: |
-          python - <<'PY'
-          import os
-          n = int(os.environ['MAX_PRS'])
-          if not 1 <= n <= 30:
-              raise SystemExit('max_prs must be between 1 and 30')
-          PY
-      - name: Collect mini audit
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          REPO: ${{ inputs.repo || 'pallets/flask' }}
-          MAX_PRS: ${{ inputs.max_prs || '12' }}
-        run: |
-          python src/collect/sample_sweloc.py --repo "$REPO" --max-prs "$MAX_PRS" --output-dir audit_outputs
+          python src/collect/sample_sweloc.py --repo "$TARGET_REPO" --max-prs "$MAX_PRS" --output-dir audit_outputs
           python src/collect/group_issues.py --input audit_outputs/sample_sweloc.jsonl --output audit_outputs/issue_level.jsonl
-      - name: Validate generated data
+      - name: Install embedding backend
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import json
-          data = [json.loads(x) for x in Path('audit_outputs/sample_sweloc.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
-          if not data:
-              raise SystemExit('No labels collected; refusing to commit empty dataset')
-          size = sum(p.stat().st_size for p in Path('audit_outputs').iterdir() if p.is_file())
-          if size > 5_000_000:
-              raise SystemExit(f'Snapshot too large for Git: {size} bytes')
-          assert Path('audit_outputs/issue_level.jsonl').stat().st_size > 0
-          print(f'Validated {len(data)} weak labels, {size} bytes')
-          PY
-      - name: Save dataset to repository (latest and run snapshot)
-        env:
-          RUN_ID: ${{ github.run_id }}
-          HEAD_SHA: ${{ github.sha }}
+          python -m pip install --upgrade pip
+          pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          pip install sentence-transformers==3.4.1 transformers==4.51.3 einops
+      - name: Compute cosine and optional LLM judgments
         run: |
           set -euo pipefail
-          mkdir -p "audit_results/$RUN_ID" audit_results/latest
-          for filename in sample_sweloc.jsonl issue_level.jsonl review_queue.csv README.md; do
-            cp "audit_outputs/$filename" "audit_results/$RUN_ID/$filename"
-            cp "audit_outputs/$filename" "audit_results/latest/$filename"
-          done
+          opts=(--embedding)
+          if [[ -n "$OPENAI_API_KEY" ]]; then opts+=(--judge); else echo "No OPENAI_API_KEY, LLM judge will remain not_run"; fi
+          python src/collect/enrich_sweloc.py --input audit_outputs/sample_sweloc.jsonl --output-dir audit_outputs --max-judge-pairs 16 "${opts[@]}"
+          python src/collect/group_issues.py --input audit_outputs/enriched_sweloc.jsonl --output audit_outputs/issue_level_enriched.jsonl
+      - name: Validate data
+        run: |
           python - <<'PY'
-          import json, os
+          import json
           from pathlib import Path
-          meta = {
-              'run_id': os.environ['RUN_ID'],
-              'source_commit': os.environ['HEAD_SHA'],
-              'run_url': f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['RUN_ID']}",
-              'label_quality': 'weak_labels_not_verified',
-          }
-          for folder in ('audit_results/latest', f"audit_results/{os.environ['RUN_ID']}"):
-              Path(folder, 'metadata.json').write_text(json.dumps(meta, indent=2) + '\n')
+          p=Path('audit_outputs')
+          rows=[json.loads(line) for line in (p/'enriched_sweloc.jsonl').read_text().splitlines() if line.strip()]
+          if not rows: raise SystemExit('No samples generated')
+          if not any(x.get('semantic_status')=='computed' for x in rows):
+              raise SystemExit('No real embedding scores were computed')
+          if sum(f.stat().st_size for f in p.iterdir() if f.is_file()) > 10000000:
+              raise SystemExit('Audit snapshot exceeds Git size limit')
+          print('Rows:',len(rows),'real cosine:',sum(x['semantic_status']=='computed' for x in rows))
           PY
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -f -- "audit_results/$RUN_ID" audit_results/latest
-          if git diff --cached --quiet; then
-            echo 'No changes to commit'
-            exit 0
-          fi
-          git commit -m "data: archive SWELOC mini-audit run $RUN_ID [skip ci]"
+      - name: Save dated dataset to repo
+        run: |
+          set -euo pipefail
+          TODAY="$(TZ=Asia/Bangkok date +%F)"
+          REPO_NAME="${TARGET_REPO//\//__}"
+          OUTPUT="audit_results/$TODAY/$REPO_NAME"
+          mkdir -p "$OUTPUT"
+          cp audit_outputs/* "$OUTPUT/"
+          python - "$OUTPUT" <<'PY'
+          import json,sys,os,pathlib
+          p=pathlib.Path(sys.argv[1])
+          metadata=json.loads((p/'enrichment_metadata.json').read_text())
+          metadata.update({'run_id':os.environ['GITHUB_RUN_ID'],'source_commit':os.environ['GITHUB_SHA'],
+                           'repo':os.environ['TARGET_REPO'],'date_timezone':'Asia/Bangkok'})
+          (p/'metadata.json').write_text(json.dumps(metadata,indent=2)+'\n')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f -- "$OUTPUT"
+          git commit -m "data: SWELOC audit for $TODAY $REPO_NAME [skip ci]"
           git pull --rebase origin main
           git push origin HEAD:main
       - name: Upload artifact backup
