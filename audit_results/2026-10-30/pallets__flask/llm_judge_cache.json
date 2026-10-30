@@ -23,6 +23,426 @@
     "match": false,
     "why": "Issue concerns session access across threads; PR adds a QUERY route decorator."
   },
+  "249ce1f618fd52a762bdd5bbcee7f4da36a10dabf53c87ea17262b612415e2be": {
+    "labels": [
+      {
+        "c": "low",
+        "i": 0,
+        "l": "uncertain",
+        "why": "Routing method snippet and truncated diff do not establish substantive changes versus relocation."
+      },
+      {
+        "c": "medium",
+        "i": 1,
+        "l": "fix_target",
+        "why": "Separate request-context teardown is core lifecycle machinery affected by merging contexts."
+      },
+      {
+        "c": "high",
+        "i": 2,
+        "l": "fix_target",
+        "why": "Explicitly manages a separate app context, the complexity the issue seeks to eliminate."
+      },
+      {
+        "c": "low",
+        "i": 3,
+        "l": "uncertain",
+        "why": "Visible changes are documentation; truncated diff does not establish whether callback registration also changes."
+      },
+      {
+        "c": "low",
+        "i": 4,
+        "l": "uncertain",
+        "why": "Context-copying helper is relevant, but no implementation changes are provided."
+      },
+      {
+        "c": "low",
+        "i": 5,
+        "l": "uncertain",
+        "why": "Existing app-context check already uses _cv_app; no functional change is shown."
+      },
+      {
+        "c": "medium",
+        "i": 6,
+        "l": "necessary_helper",
+        "why": "Request-presence detection must distinguish request-bearing contexts from app-only contexts after unification."
+      },
+      {
+        "c": "high",
+        "i": 7,
+        "l": "necessary_helper",
+        "why": "Diff replaces request_ctx access with unified app-context lookup and explicit request-presence checking."
+      }
+    ],
+    "match": true,
+    "why": "Issue requests unified contexts; PR explicitly merges RequestContext into AppContext."
+  },
+  "45c73381d4c1092a97f2a8fcad8f76159a970c91e4ccd8f1ecb71257e5c191c7": {
+    "labels": [
+      {
+        "c": "high",
+        "i": 0,
+        "l": "necessary_helper",
+        "why": "Removing this private-state reset supports replacing the session fixture with per-test environment cleanup."
+      },
+      {
+        "c": "high",
+        "i": 1,
+        "l": "fix_target",
+        "why": "Fixture directly accesses removed monkeypatch.notset, causing the reported setup failure."
+      },
+      {
+        "c": "high",
+        "i": 2,
+        "l": "uncertain",
+        "why": "No supplied diff changes this test; its code does not reference removed APIs."
+      },
+      {
+        "c": "high",
+        "i": 3,
+        "l": "test_change",
+        "why": "Adds explicit FOO cleanup to improve test isolation."
+      },
+      {
+        "c": "medium",
+        "i": 4,
+        "l": "test_change",
+        "why": "Test uses removed notset sentinel, but its specific modification is absent from supplied diffs."
+      },
+      {
+        "c": "high",
+        "i": 5,
+        "l": "test_change",
+        "why": "Replaces private sentinel bookkeeping with public monkeypatch.delenv calls in test setup."
+      }
+    ],
+    "match": true,
+    "why": "PR removes private monkeypatch APIs from the same files implicated in pytest 9.1 incompatibility."
+  },
+  "564499573d38f38a05073394f5a879e4706ad469dde9f01f09ed2c46b7068c62": {
+    "labels": [
+      {
+        "c": "low",
+        "i": 0,
+        "l": "uncertain",
+        "why": "Partial function body and supplied diffs show no context-merging changes here."
+      },
+      {
+        "c": "low",
+        "i": 1,
+        "l": "uncertain",
+        "why": "Only a partial docstring is provided; no function-specific changes establish relevance."
+      },
+      {
+        "c": "low",
+        "i": 2,
+        "l": "uncertain",
+        "why": "Session usage alone does not establish whether this function requires changes for merged contexts."
+      },
+      {
+        "c": "low",
+        "i": 3,
+        "l": "uncertain",
+        "why": "Body and relevant diff are missing; context storage migration cannot be verified."
+      },
+      {
+        "c": "low",
+        "i": 4,
+        "l": "uncertain",
+        "why": "Partial docstring provides no evidence of required context-merging changes."
+      },
+      {
+        "c": "medium",
+        "i": 5,
+        "l": "fix_target",
+        "why": "Diff updates streaming context preservation to use the unified context; target shows only an overload."
+      },
+      {
+        "c": "high",
+        "i": 6,
+        "l": "fix_target",
+        "why": "Generator diff replaces separate request and app context handling with a single context."
+      },
+      {
+        "c": "high",
+        "i": 7,
+        "l": "incidental_change",
+        "why": "Only documentation wording changes; serialization behavior is unchanged."
+      }
+    ],
+    "match": true,
+    "why": "Issue and PR both merge request and app contexts into one context."
+  },
+  "60f3b6cfbd980e80fea6361bdc62e5c43a607732f2db52b960f97afb5b56a36e": {
+    "labels": [
+      {
+        "c": "high",
+        "i": 0,
+        "l": "fix_target",
+        "why": "AppContext initialization must incorporate optional request and session state for the merged context."
+      },
+      {
+        "c": "high",
+        "i": 1,
+        "l": "fix_target",
+        "why": "Unified context teardown must handle request cleanup alongside app cleanup."
+      },
+      {
+        "c": "high",
+        "i": 2,
+        "l": "fix_target",
+        "why": "Context activation must unify previously separate app and request lifecycle handling."
+      },
+      {
+        "c": "medium",
+        "i": 3,
+        "l": "necessary_helper",
+        "why": "RequestContext context-manager entry must migrate or disappear with the class merger."
+      },
+      {
+        "c": "medium",
+        "i": 4,
+        "l": "necessary_helper",
+        "why": "Context-manager exit delegates cleanup; consolidation requires migrating or removing this wrapper."
+      },
+      {
+        "c": "high",
+        "i": 5,
+        "l": "fix_target",
+        "why": "Separate request initialization is central functionality being merged into AppContext."
+      },
+      {
+        "c": "medium",
+        "i": 6,
+        "l": "necessary_helper",
+        "why": "Request-only representation needs adaptation or removal when contexts merge."
+      },
+      {
+        "c": "medium",
+        "i": 7,
+        "l": "necessary_helper",
+        "why": "Request context copying must adapt to the unified context type and its state."
+      }
+    ],
+    "match": true,
+    "why": "Issue requests unified contexts; PR explicitly merges RequestContext into AppContext."
+  },
+  "746f4c00dbfe9918c922f2c96277f891509f85668d097b1d26021dcb0b316e1c": {
+    "labels": [
+      {
+        "c": "medium",
+        "i": 0,
+        "l": "necessary_helper",
+        "why": "Request context factory must adapt to the merged context class; implementation changes are not shown."
+      },
+      {
+        "c": "medium",
+        "i": 1,
+        "l": "necessary_helper",
+        "why": "Production convenience factory exposes request contexts and must accommodate the merged class; not itself a test."
+      },
+      {
+        "c": "high",
+        "i": 2,
+        "l": "necessary_helper",
+        "why": "Uses unified context and has_request to select request-specific template processors."
+      },
+      {
+        "c": "high",
+        "i": 3,
+        "l": "necessary_helper",
+        "why": "Replaces separate request context lookup with unified context and request availability checking."
+      },
+      {
+        "c": "low",
+        "i": 4,
+        "l": "uncertain",
+        "why": "WSGI lifecycle likely needs integration, but supplied excerpt and diffs omit relevant implementation."
+      },
+      {
+        "c": "high",
+        "i": 5,
+        "l": "incidental_change",
+        "why": "Only removes a type-ignore comment; runtime context behavior is unchanged."
+      },
+      {
+        "c": "low",
+        "i": 6,
+        "l": "uncertain",
+        "why": "Delegates to push; no evidence this wrapper changes or implements context merging."
+      },
+      {
+        "c": "low",
+        "i": 7,
+        "l": "uncertain",
+        "why": "Delegates to pop; no evidence this wrapper changes or implements context merging."
+      }
+    ],
+    "match": true,
+    "why": "Issue and PR both explicitly merge application and request contexts into one context."
+  },
+  "89b80f2286d69f1c89c362168098c0c33a17313de0f8bc4195125afc759a831a": {
+    "labels": [
+      {
+        "c": "low",
+        "i": 0,
+        "l": "uncertain",
+        "why": "Only truncated documentation is provided; no implementation diff establishes its role."
+      },
+      {
+        "c": "high",
+        "i": 1,
+        "l": "necessary_helper",
+        "why": "Dispatch now obtains the request from the unified application context."
+      },
+      {
+        "c": "low",
+        "i": 2,
+        "l": "uncertain",
+        "why": "Teardown may require adaptation, but no implementation or relevant diff is provided."
+      },
+      {
+        "c": "low",
+        "i": 3,
+        "l": "uncertain",
+        "why": "Request teardown implementation and changes are absent; documentation alone cannot establish its role."
+      },
+      {
+        "c": "high",
+        "i": 4,
+        "l": "incidental_change",
+        "why": "Replacing current_app configuration access with self is cleanup, not context consolidation."
+      },
+      {
+        "c": "high",
+        "i": 5,
+        "l": "necessary_helper",
+        "why": "OPTIONS handling must retrieve its URL adapter from the unified context."
+      },
+      {
+        "c": "low",
+        "i": 6,
+        "l": "uncertain",
+        "why": "Truncated documentation provides no evidence of implementation changes supporting context consolidation."
+      },
+      {
+        "c": "low",
+        "i": 7,
+        "l": "uncertain",
+        "why": "Response processing implementation and relevant changes are not shown."
+      }
+    ],
+    "match": true,
+    "why": "Issue and PR both merge request and application contexts into one context."
+  },
+  "936f2ddd1b38d30535acb9e9960c864dcf38969e02a846c5a45ddba476a05292": {
+    "labels": [
+      {
+        "c": "high",
+        "i": 0,
+        "l": "incidental_change",
+        "why": "Only documentation changes describe the merged context lifecycle."
+      },
+      {
+        "c": "high",
+        "i": 1,
+        "l": "incidental_change",
+        "why": "Only docstring wording changes; teardown behavior is unchanged."
+      },
+      {
+        "c": "high",
+        "i": 2,
+        "l": "necessary_helper",
+        "why": "Template injection must read request, session, and g from the unified context."
+      },
+      {
+        "c": "high",
+        "i": 3,
+        "l": "necessary_helper",
+        "why": "Streaming now preserves context unconditionally, supporting unified contexts without requests."
+      },
+      {
+        "c": "high",
+        "i": 4,
+        "l": "incidental_change",
+        "why": "Only an obsolete type-ignore comment is removed."
+      },
+      {
+        "c": "high",
+        "i": 5,
+        "l": "incidental_change",
+        "why": "Only an obsolete type-ignore comment is removed."
+      },
+      {
+        "c": "medium",
+        "i": 6,
+        "l": "incidental_change",
+        "why": "Visible diff only removes a type-ignore comment; remaining diff is truncated."
+      },
+      {
+        "c": "low",
+        "i": 7,
+        "l": "uncertain",
+        "why": "Provided diff does not show changes to this function."
+      }
+    ],
+    "match": true,
+    "why": "Issue and PR both merge request context into app context; supplied diffs adapt context consumers."
+  },
+  "a3eb1c953ae157e8576bade0d5d8edc54090f633b0df5ecdd0c79678e29f8ca3": {
+    "labels": [
+      {
+        "c": "high",
+        "i": 0,
+        "l": "test_change",
+        "why": "Test fixture detects leaked unified app contexts instead of request contexts."
+      },
+      {
+        "c": "high",
+        "i": 1,
+        "l": "test_change",
+        "why": "Updates teardown expectations for separate unified contexts used by requests and with blocks."
+      },
+      {
+        "c": "high",
+        "i": 2,
+        "l": "test_change",
+        "why": "Updates teardown count and exception identity assertions for unified context behavior."
+      },
+      {
+        "c": "high",
+        "i": 3,
+        "l": "test_change",
+        "why": "Test route removes nested request context usage after context unification."
+      },
+      {
+        "c": "high",
+        "i": 4,
+        "l": "test_change",
+        "why": "Test route copies app_ctx instead of the removed separate request context."
+      },
+      {
+        "c": "high",
+        "i": 5,
+        "l": "test_change",
+        "why": "Greenlet test helper enters the renamed unified context copy."
+      },
+      {
+        "c": "medium",
+        "i": 6,
+        "l": "test_change",
+        "why": "Test session interface switches request matching to app_ctx; diff heading differs from supplied function."
+      },
+      {
+        "c": "high",
+        "i": 7,
+        "l": "test_change",
+        "why": "Context preservation test checks unified app context variable instead of separate request context variable."
+      }
+    ],
+    "match": true,
+    "why": "PR explicitly merges request and app contexts, matching the issue's proposed unified context."
+  },
   "ca6d13d86a6d3364ea4c442990df8de2f3ec4d6fa112c774a243bef711daaf18": {
     "labels": [
       {
