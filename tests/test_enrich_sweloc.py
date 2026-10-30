@@ -1,6 +1,7 @@
-import importlib.util,unittest
+import importlib.util,unittest,sys
 from pathlib import Path
 p=Path(__file__).resolve().parents[1]/'src'/'collect'/'enrich_sweloc.py'
+sys.path.insert(0,str(p.parent))
 spec=importlib.util.spec_from_file_location('enrich',p);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 class EnrichmentTests(unittest.TestCase):
  def test_cosine(self):
