@@ -25,6 +25,28 @@ class BudgetTests(unittest.TestCase):
    self.assertEqual(stat2['api_calls'],0)
    self.assertEqual(stat2['cache_hits'],1)
    self.assertEqual(len(calls),1)
+ def test_large_group_all_batches(self):
+  rows=[dict(instance_id="i",repo="a/b",pr_number=2,issue_url="issue",base_commit="abc",query="Error",positive_id="src/a.py/f"+str(i),semantic_overlap=0,llm_judge_status="pending") for i in range(17)]
+  calls=[]
+  def fetch(path):
+   return [] if '/files?' in path else {'title':'fix','body':'fix'}
+  def request(payload):
+   calls.append(payload)
+   import json
+   count=len(json.loads(payload['input'].split('\\n',1)[1])['targets'])
+   labels=[{'i':i,'l':'fix_target','c':'low','why':'related'} for i in range(count)]
+   return {'output':[{'content':[{'type':'output_text','text':json.dumps({'match':True,'labels':labels})}]}],'usage':{'input_tokens':100,'output_tokens':100}}
+  import tempfile
+  with tempfile.TemporaryDirectory() as d:
+   cache=str(Path(d)/'cache.json')
+   stats=m.run_budgeted_judge(rows,{},None,'fake','test',3,8,cache,fetch,request)
+   self.assertEqual(stats['api_calls'],3)
+   self.assertEqual(stats['reviewed'],17)
+   self.assertEqual(len(calls),3)
+   self.assertTrue(all(r['llm_judge_status']=='completed_unverified' for r in rows))
+   stats2=m.run_budgeted_judge([dict(x,llm_judge_status='pending') for x in rows],{},None,'fake','test',3,8,cache,fetch,request)
+   self.assertEqual(stats2['api_calls'],0)
+   self.assertEqual(stats2['reviewed'],17)
  def test_parse_labels(self):
   self.assertRaises(ValueError,m.parse_labels,{'match':True,'labels':[]},2)
  def test_zero_calls(self):
