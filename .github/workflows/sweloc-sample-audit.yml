@@ -7,34 +7,103 @@ on:
         required: true
         default: pallets/flask
       max_prs:
-        description: Max recent eligible merged PRs
+        description: Max recent eligible merged PRs (1-30)
         required: true
         default: '12'
   push:
     paths:
       - src/collect/sample_sweloc.py
+      - src/collect/group_issues.py
+      - src/collect/build_gold_subgraph.py
       - tests/test_sample_sweloc.py
+      - tests/test_group_issues.py
+      - tests/test_gold_subgraph.py
       - .github/workflows/sweloc-sample-audit.yml
 permissions:
-  contents: read
+  contents: write
+concurrency:
+  group: sweloc-audit-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   audit:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
       - name: Unit tests
         run: python -m unittest discover -s tests -v
+      - name: Validate run scope
+        env:
+          MAX_PRS: ${{ inputs.max_prs || '12' }}
+        run: |
+          python - <<'PY'
+          import os
+          n = int(os.environ['MAX_PRS'])
+          if not 1 <= n <= 30:
+              raise SystemExit('max_prs must be between 1 and 30')
+          PY
       - name: Collect mini audit
         env:
           GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ inputs.repo || 'pallets/flask' }}
           MAX_PRS: ${{ inputs.max_prs || '12' }}
-        run: python src/collect/sample_sweloc.py --repo "$REPO" --max-prs "$MAX_PRS" --output-dir audit_outputs
-      - name: Upload outputs
+        run: |
+          python src/collect/sample_sweloc.py --repo "$REPO" --max-prs "$MAX_PRS" --output-dir audit_outputs
+          python src/collect/group_issues.py --input audit_outputs/sample_sweloc.jsonl --output audit_outputs/issue_level.jsonl
+      - name: Validate generated data
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          data = [json.loads(x) for x in Path('audit_outputs/sample_sweloc.jsonl').read_text(encoding='utf-8').splitlines() if x.strip()]
+          if not data:
+              raise SystemExit('No labels collected; refusing to commit empty dataset')
+          size = sum(p.stat().st_size for p in Path('audit_outputs').iterdir() if p.is_file())
+          if size > 5_000_000:
+              raise SystemExit(f'Snapshot too large for Git: {size} bytes')
+          assert Path('audit_outputs/issue_level.jsonl').stat().st_size > 0
+          print(f'Validated {len(data)} weak labels, {size} bytes')
+          PY
+      - name: Save dataset to repository (latest and run snapshot)
+        env:
+          RUN_ID: ${{ github.run_id }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p "audit_results/$RUN_ID" audit_results/latest
+          for filename in sample_sweloc.jsonl issue_level.jsonl review_queue.csv README.md; do
+            cp "audit_outputs/$filename" "audit_results/$RUN_ID/$filename"
+            cp "audit_outputs/$filename" "audit_results/latest/$filename"
+          done
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          meta = {
+              'run_id': os.environ['RUN_ID'],
+              'source_commit': os.environ['HEAD_SHA'],
+              'run_url': f"https://github.com/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['RUN_ID']}",
+              'label_quality': 'weak_labels_not_verified',
+          }
+          for folder in ('audit_results/latest', f"audit_results/{os.environ['RUN_ID']}"):
+              Path(folder, 'metadata.json').write_text(json.dumps(meta, indent=2) + '\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f -- "audit_results/$RUN_ID" audit_results/latest
+          if git diff --cached --quiet; then
+            echo 'No changes to commit'
+            exit 0
+          fi
+          git commit -m "data: archive SWELOC mini-audit run $RUN_ID [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main
+      - name: Upload artifact backup
         if: always()
         uses: actions/upload-artifact@v4
         with:
