@@ -1,21 +1,24 @@
 {
   "llm_usage": {
-    "api_calls": 0,
+    "api_calls": 1,
     "cache_hits": 0,
     "input_tokens": 0,
     "output_tokens": 0,
-    "reviewed": 0
+    "reviewed": 0,
+    "skipped_budget": 8,
+    "skipped_large_group": 56,
+    "errors": 1
   },
-  "created_utc": "2026-10-30T11:57:21.336401+00:00",
+  "created_utc": "2026-10-30T12:22:29.708348+00:00",
   "samples": 65,
   "semantic_computed": 64,
   "semantic_errors": 1,
   "llm_completed": 0,
   "llm_skipped_no_key": 0,
-  "llm_errors": 0,
+  "llm_errors": 1,
   "notice": "LLM labels and modified functions are unverified, not causal gold truth",
-  "run_id": "41051571913",
-  "source_commit": "9757545b91489a43d0aa095ba5a358ae3059c59e",
+  "run_id": "41054615671",
+  "source_commit": "8fbd34c95addd6f0895b000128802770c2341cd8",
   "repo": "pallets/flask",
   "date_timezone": "Asia/Bangkok"
 }
