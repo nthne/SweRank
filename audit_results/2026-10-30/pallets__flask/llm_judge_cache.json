@@ -10,5 +10,17 @@
     ],
     "match": false,
     "why": "Issue concerns session access across threads; PR adds a QUERY route decorator."
+  },
+  "1c43a17ff05b80ff83cad4ad59575f6e48d61df75f052987de5cd89d9551de47": {
+    "labels": [
+      {
+        "c": "high",
+        "i": 0,
+        "l": "wrong_issue_pr_link",
+        "why": "Route decorator test changes do not address session availability in threads."
+      }
+    ],
+    "match": false,
+    "why": "Issue concerns session access across threads; PR adds a QUERY route decorator."
   }
 }
