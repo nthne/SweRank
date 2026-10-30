@@ -22,5 +22,23 @@
     ],
     "match": false,
     "why": "Issue concerns session access across threads; PR adds a QUERY route decorator."
+  },
+  "ca6d13d86a6d3364ea4c442990df8de2f3ec4d6fa112c774a243bef711daaf18": {
+    "labels": [
+      {
+        "c": "high",
+        "i": 0,
+        "l": "fix_target",
+        "why": "Replaces SERVER_NAME colon partitioning with URL parsing to correctly extract IPv6 host and port."
+      },
+      {
+        "c": "high",
+        "i": 1,
+        "l": "fix_target",
+        "why": "Replaces request host colon partitioning with URL parsing for IPv6 session cookie handling."
+      }
+    ],
+    "match": true,
+    "why": "PR fixes both IPv6 address parsing failures described in the issue."
   }
 }
