@@ -1,5 +1,12 @@
 {
-  "created_utc": "2026-10-30T11:03:32.861204+00:00",
+  "llm_usage": {
+    "api_calls": 0,
+    "cache_hits": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "reviewed": 0
+  },
+  "created_utc": "2026-10-30T11:57:21.336401+00:00",
   "samples": 65,
   "semantic_computed": 64,
   "semantic_errors": 1,
