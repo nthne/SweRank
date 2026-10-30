@@ -33,7 +33,7 @@ class BudgetTests(unittest.TestCase):
   def request(payload):
    calls.append(payload)
    import json
-   count=len(json.loads(payload['input'].split('\\n',1)[1])['targets'])
+   count=len(json.loads(payload['input'][payload['input'].find('{'):])['targets'])
    labels=[{'i':i,'l':'fix_target','c':'low','why':'related'} for i in range(count)]
    return {'output':[{'content':[{'type':'output_text','text':json.dumps({'match':True,'labels':labels})}]}],'usage':{'input_tokens':100,'output_tokens':100}}
   import tempfile
