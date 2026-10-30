@@ -214,3 +214,29 @@ def run_budgeted_judge(rows,codes,token,key,model,max_calls=1,max_pairs=8,
                 rows[i]["judge_error"]=(type(exc).__name__+": "+str(exc))[:160]
     save_cache(cache_path,cache)
     return stats
+
+# Evaluate every candidate by chunking large issue groups. The original judge
+# remains the bounded single-batch implementation so cache keys stay compatible.
+_single_batch_judge = run_budgeted_judge
+
+def run_budgeted_judge(rows,codes,token,key,model,max_calls=1,max_pairs=8,
+                       cache_path=None,fetch_fn=None,request_fn=None):
+    if max_pairs < 1 or max_calls < 0:
+        raise ValueError("Invalid LLM judge batch budget")
+    grouped=defaultdict(list)
+    for i,row in enumerate(rows):
+        grouped[(row["repo"],row["pr_number"],row["issue_url"],row["base_commit"])].append(i)
+    stats=dict(api_calls=0,cache_hits=0,input_tokens=0,output_tokens=0,
+               reviewed=0,skipped_budget=0,skipped_large_group=0,errors=0)
+    for indices in grouped.values():
+        for start in range(0,len(indices),max_pairs):
+            chosen=indices[start:start+max_pairs]
+            small_rows=[rows[i] for i in chosen]
+            small_codes={j:codes.get(i,"") for j,i in enumerate(chosen)}
+            remaining=max(0,max_calls-stats["api_calls"])
+            part=_single_batch_judge(small_rows,small_codes,token,key,model,
+                  max_calls=min(1,remaining),max_pairs=max_pairs,
+                  cache_path=cache_path,fetch_fn=fetch_fn,request_fn=request_fn)
+            for name in stats:
+                stats[name]+=part.get(name,0)
+    return stats
