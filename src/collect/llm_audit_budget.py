@@ -7,6 +7,7 @@ import json
 from collections import defaultdict
 from pathlib import Path
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 VERSION="budgeted-judge-v1"
 VALID_LABELS={"fix_target","necessary_helper","test_change","incidental_change",
@@ -111,7 +112,20 @@ def openai_response(payload,key,model,output_limit=950,request_fn=None):
         req=Request("https://api.openai.com/v1/responses",
             data=json.dumps(request).encode(),method="POST",
             headers={"Authorization":"Bearer "+key,"Content-Type":"application/json"})
-        with urlopen(req,timeout=140) as r:resp=json.load(r)
+        try:
+            with urlopen(req,timeout=140) as r:
+                resp=json.load(r)
+        except HTTPError as exc:
+            # API error bodies contain actionable error codes, but NEVER print the request or key.
+            try:
+                body=json.loads(exc.read(2048).decode("utf-8","replace"))
+                err=body.get("error",{})
+                if not isinstance(err,dict):err={}
+                parts=[str(err.get(x) or "")[:180] for x in ("type","code","param","message")]
+                details=" | ".join(x for x in parts if x)
+            except (ValueError,UnicodeError,AttributeError):
+                details="unparseable API response"
+            raise ValueError(f"OpenAI HTTP {exc.code}: {details}") from None
     if resp.get("status")=="incomplete":
         raise ValueError("LLM response incomplete: output limit reached")
     texts=[c.get("text","") for block in resp.get("output",[])
