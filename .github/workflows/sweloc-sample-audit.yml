@@ -62,7 +62,8 @@ jobs:
         run: |
           set -euo pipefail
           opts=(--embedding)
-          if [[ -n "$OPENAI_API_KEY" ]]; then opts+=(--judge); else echo "No OPENAI_API_KEY, LLM judge will remain not_run"; fi
+          if [[ -z "$OPENAI_API_KEY" ]]; then echo "::error::OPENAI_API_KEY is missing"; exit 1; fi
+          opts+=(--judge)
           python src/collect/enrich_sweloc.py --input audit_outputs/sample_sweloc.jsonl --output-dir audit_outputs --max-judge-pairs 8 --max-llm-calls 1 --llm-cache audit_outputs/llm_judge_cache.json "${opts[@]}"
           python src/collect/group_issues.py --input audit_outputs/enriched_sweloc.jsonl --output audit_outputs/issue_level_enriched.jsonl
       - name: Validate data
@@ -75,6 +76,10 @@ jobs:
           if not rows: raise SystemExit('No samples generated')
           if not any(x.get('semantic_status')=='computed' for x in rows):
               raise SystemExit('No real embedding scores were computed')
+          m=json.loads((p/'enrichment_metadata.json').read_text())
+          if m.get('llm_completed',0)<1:
+              problems=[x.get('judge_error') for x in rows if x.get('llm_judge_status')=='judge_error']
+              raise SystemExit('LLM judge produced no validated labels: '+repr(problems[:1]))
           if sum(f.stat().st_size for f in p.iterdir() if f.is_file()) > 10000000:
               raise SystemExit('Audit snapshot exceeds Git size limit')
           print('Rows:',len(rows),'real cosine:',sum(x['semantic_status']=='computed' for x in rows))
@@ -99,7 +104,9 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -f -- "$OUTPUT"
           git commit -m "data: SWELOC audit for $TODAY $REPO_NAME [skip ci]"
-          git pull --rebase origin main
+          # Data snapshot is generated afresh; never rebase over an existing dated snapshot.
+          git fetch origin main
+          git reset --soft origin/main
           git push origin HEAD:main
       - name: Upload artifact backup
         if: always()
