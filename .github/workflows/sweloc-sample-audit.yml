@@ -15,6 +15,7 @@ on:
       - src/collect/enrich_sweloc.py
       - src/collect/llm_audit_budget.py
       - tests/test_llm_audit_budget.py
+      - tests/test_enrich_sweloc.py
       - src/collect/group_issues.py
       - .github/workflows/sweloc-sample-audit.yml
 permissions:
