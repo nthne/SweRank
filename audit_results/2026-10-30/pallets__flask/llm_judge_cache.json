@@ -1,1 +1,14 @@
-{}
+{
+  "1c43a17ff05b80ff83cad4ad59575f052987de5cd89d9551de47": {
+    "labels": [
+      {
+        "c": "high",
+        "i": 0,
+        "l": "wrong_issue_pr_link",
+        "why": "Route-method test changes cover QUERY support, not session availability in threads."
+      }
+    ],
+    "match": false,
+    "why": "Issue concerns session access across threads; PR adds a QUERY route decorator."
+  }
+}

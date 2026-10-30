@@ -102,12 +102,17 @@ jobs:
           PY
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -f -- "$OUTPUT"
-          git commit -m "data: SWELOC audit for $TODAY $REPO_NAME [skip ci]"
-          # Data snapshot is generated afresh; never rebase over an existing dated snapshot.
+          # Refresh the branch BEFORE staging a new snapshot. Do not reset HEAD
+          # after committing: that previously discarded the new commit silently.
           git fetch origin main
-          git reset --soft origin/main
-          git push origin HEAD:main
+          git reset --mixed origin/main
+          git add -f -- "$OUTPUT"
+          if git diff --cached --quiet; then
+            echo "Dataset already up-to-date"
+          else
+            git commit -m "data: SWELOC audit for $TODAY $REPO_NAME [skip ci]"
+            git push origin HEAD:main
+          fi
       - name: Upload artifact backup
         if: always()
         uses: actions/upload-artifact@v4
