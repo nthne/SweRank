@@ -101,7 +101,7 @@ def openai_response(payload,key,model,output_limit=950,request_fn=None):
     )
     request={
         "model":model,"instructions":instructions,
-        "input":json.dumps(payload,ensure_ascii=False,separators=(",",":")),
+        "input":"Return a JSON object for this audit data:\n"+json.dumps(payload,ensure_ascii=False,separators=(",",":")),
         "reasoning":{"effort":"low"},
         "text":{"format":{"type":"json_object"}},
         "max_output_tokens":output_limit,
