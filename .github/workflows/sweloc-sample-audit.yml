@@ -13,6 +13,8 @@ on:
   push:
     paths:
       - src/collect/enrich_sweloc.py
+      - src/collect/llm_audit_budget.py
+      - tests/test_llm_audit_budget.py
       - src/collect/group_issues.py
       - .github/workflows/sweloc-sample-audit.yml
 permissions:
@@ -46,12 +48,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
           pip install sentence-transformers==3.4.1 transformers==4.51.3 einops
+      - name: Restore previous LLM judgments for reuse
+        run: |
+          set -euo pipefail
+          TODAY="$(TZ=Asia/Bangkok date +%F)"
+          REPO_NAME="${TARGET_REPO//\//__}"
+          mkdir -p audit_outputs
+          if [[ -f "audit_results/$TODAY/$REPO_NAME/llm_judge_cache.json" ]]; then
+            cp "audit_results/$TODAY/$REPO_NAME/llm_judge_cache.json" audit_outputs/llm_judge_cache.json
+          fi
       - name: Compute cosine and optional LLM judgments
         run: |
           set -euo pipefail
           opts=(--embedding)
           if [[ -n "$OPENAI_API_KEY" ]]; then opts+=(--judge); else echo "No OPENAI_API_KEY, LLM judge will remain not_run"; fi
-          python src/collect/enrich_sweloc.py --input audit_outputs/sample_sweloc.jsonl --output-dir audit_outputs --max-judge-pairs 16 "${opts[@]}"
+          python src/collect/enrich_sweloc.py --input audit_outputs/sample_sweloc.jsonl --output-dir audit_outputs --max-judge-pairs 8 --max-llm-calls 1 --llm-cache audit_outputs/llm_judge_cache.json "${opts[@]}"
           python src/collect/group_issues.py --input audit_outputs/enriched_sweloc.jsonl --output audit_outputs/issue_level_enriched.jsonl
       - name: Validate data
         run: |

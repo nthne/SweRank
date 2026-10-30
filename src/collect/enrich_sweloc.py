@@ -6,11 +6,13 @@ import argparse, ast, base64, csv, hashlib, json, math, os, re, sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from llm_audit_budget import run_budgeted_judge
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 EMBED_MODEL="Salesforce/SweRankEmbed-Small"
 JUDGE_MODEL="gpt-6.1-sol"
+LAST_LLM_STATS={}
 LABELS={"fix_target","necessary_helper","test_change","incidental_change","wrong_issue_pr_link","uncertain"}
 
 def github_json(path, token):
@@ -131,7 +133,7 @@ def validate_judgement(parsed,rows):
     return observed
 
 def enrich(rows,embedding=False,judge=False,model_name=EMBED_MODEL,
-           judge_model=JUDGE_MODEL,max_judge_pairs=16,
+           judge_model=JUDGE_MODEL,max_judge_pairs=8,max_llm_calls=1,cache_path=None,
            github_token=None,openai_key=None,encoder=None,judge_fn=None):
     out=[dict(r) for r in rows]
     cache,codes={},{}
@@ -160,39 +162,13 @@ def enrich(rows,embedding=False,judge=False,model_name=EMBED_MODEL,
             for r in out:
                 if r["semantic_status"]=="pending":r["semantic_status"]="model_error"
             print("Embedding failed:",exc,file=sys.stderr)
+    stats={"api_calls":0,"cache_hits":0,"input_tokens":0,"output_tokens":0,"reviewed":0}
     if judge:
-        if not openai_key and not judge_fn:
-            for r in out:r["llm_judge_status"]="not_run_no_api_key"
-        else:
-            groups=defaultdict(list)
-            for i,r in enumerate(out):
-                groups[(r["repo"],r["pr_number"],r["issue_url"],r["base_commit"])].append(i)
-            used=0
-            for (repo,pr,_,_),indices in groups.items():
-                for start in range(0,len(indices),8):
-                    batch=indices[start:start+8]
-                    if used+len(batch)>max_judge_pairs:
-                        for i in batch:out[i]["llm_judge_status"]="skipped_budget"
-                        continue
-                    try:
-                        detail=github_json(f"/repos/{repo}/pulls/{pr}",github_token) if not judge_fn else {}
-                        patches=github_json(f"/repos/{repo}/pulls/{pr}/files?per_page=100",github_token) if not judge_fn else []
-                        payload=judge_payload(out,batch,codes,detail,patches)
-                        parsed=judge_fn(payload) if judge_fn else call_openai(payload,openai_key,judge_model)
-                        labels=validate_judgement(parsed,[out[i] for i in batch])
-                        for i in batch:
-                            j=labels[out[i]["positive_id"]]
-                            out[i].update(llm_judge_status="completed_unverified",
-                              llm_relevance_label=j["label"],llm_confidence=j["confidence"],
-                              llm_evidence=str(j.get("evidence",""))[:500],
-                              issue_pr_match=parsed["issue_pr_match"],
-                              issue_pr_evidence=str(parsed.get("issue_pr_evidence",""))[:500])
-                        used+=len(batch)
-                    except Exception as exc:
-                        for i in batch:
-                            out[i]["llm_judge_status"]="judge_error"
-                            out[i]["judge_error"]=str(exc)[:150]
-                        print("LLM judgment error:",exc,file=sys.stderr)
+        stats=run_budgeted_judge(out,codes,github_token,openai_key,judge_model,
+            max_calls=max_llm_calls,max_pairs=max_judge_pairs,
+            cache_path=cache_path)
+    global LAST_LLM_STATS
+    LAST_LLM_STATS=stats
     return out
 
 def save(rows,outdir):
@@ -216,11 +192,11 @@ def save(rows,outdir):
                ["instance_id","positive_id","llm_judge_status","llm_relevance_label",
                 "llm_confidence","llm_evidence","issue_pr_match","issue_pr_evidence"]},
                 ensure_ascii=False)+"\n")
-    meta={"created_utc":datetime.now(timezone.utc).isoformat(),"samples":len(rows),
+    meta={"llm_usage":LAST_LLM_STATS,"created_utc":datetime.now(timezone.utc).isoformat(),"samples":len(rows),
           "semantic_computed":sum(x["semantic_status"]=="computed" for x in rows),
           "semantic_errors":sum(x["semantic_status"] in
               ("unresolved_source","model_error","invalid_vector") for x in rows),
-          "llm_completed":sum(x["llm_judge_status"]=="completed_unverified" for x in rows),
+          "llm_completed":sum(x["llm_judge_status"] in ("completed_unverified","cache_hit_unverified") for x in rows),
           "llm_skipped_no_key":sum(x["llm_judge_status"]=="not_run_no_api_key" for x in rows),
           "llm_errors":sum(x["llm_judge_status"]=="judge_error" for x in rows),
           "notice":"LLM labels and modified functions are unverified, not causal gold truth"}
@@ -235,12 +211,15 @@ def main():
     p.add_argument("--judge",action="store_true")
     p.add_argument("--embedding-model",default=EMBED_MODEL)
     p.add_argument("--judge-model",default=JUDGE_MODEL)
-    p.add_argument("--max-judge-pairs",type=int,default=16)
+    p.add_argument("--max-judge-pairs",type=int,default=8)
+    p.add_argument("--max-llm-calls",type=int,default=1)
+    p.add_argument("--llm-cache",default=None)
     args=p.parse_args()
     with open(args.input,encoding="utf-8") as f:rows=[json.loads(s) for s in f if s.strip()]
     if not rows:raise SystemExit("No samples")
     result=enrich(rows,args.embedding,args.judge,args.embedding_model,args.judge_model,
-                  args.max_judge_pairs,os.getenv("GITHUB_TOKEN"),os.getenv("OPENAI_API_KEY"))
+                  args.max_judge_pairs,args.max_llm_calls,args.llm_cache,
+                  os.getenv("GITHUB_TOKEN"),os.getenv("OPENAI_API_KEY"))
     print("ENRICHMENT",json.dumps(save(result,args.output_dir),ensure_ascii=False))
 
 if __name__=="__main__":main()
