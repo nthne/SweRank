@@ -1,0 +1,10 @@
+{
+  "created_utc": "2026-10-30T11:03:32.861204+00:00",
+  "samples": 65,
+  "semantic_computed": 64,
+  "semantic_errors": 1,
+  "llm_completed": 0,
+  "llm_skipped_no_key": 0,
+  "llm_errors": 0,
+  "notice": "LLM labels and modified functions are unverified, not causal gold truth"
+}
