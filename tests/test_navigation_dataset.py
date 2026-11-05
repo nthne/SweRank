@@ -14,6 +14,7 @@ from navigation_graph import (adjacency, bm25_rank, collect_repo, distance_to_ta
 from build_navigation_dataset import build_case, classify, read_manifest, features, build_dataset
 from train_navigation_scorer import fit, sigmoid, dot
 from infer_navigation import infer
+from export_navigation_review import summarize
 
 
 def case_row(target, match=True, confidence='high'):
@@ -161,6 +162,14 @@ def unrelated(x):
             'czlll/Loc-Bench_V1': {'instances': 560}},
             'repositories': [f'a/repo{i}' for i in range(10)]}))
         self.assertEqual(len(read_manifest(path)[0]), 10)
+
+    def test_review_summary_handles_unreached_multiple_targets(self):
+        cases = [{'case_type': 'reverse_oracle_probe', 'accepted_targets': {'target_a': 'llm_pseudo', 'target_b': 'llm_pseudo'},
+                  'gold_paths': [{'target': 'target_a', 'seed': 'seed', 'nodes': ['seed', 'target_a'], 'hops': 1}]}]
+        result = summarize(cases, [])
+        self.assertEqual(result['unreached_accepted_target_count'], 1)
+        self.assertEqual(result['hop_distribution_min_per_issue'], {'1': 1})
+        self.assertEqual(result['hop_distribution_min_per_target'], {'1': 1})
 
     def test_scorer_no_teacher_feature_leakage(self):
         feat = {k: .2 for k in __import__('build_navigation_dataset').FEATURES}
