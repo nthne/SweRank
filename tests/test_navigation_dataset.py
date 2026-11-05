@@ -108,6 +108,25 @@ def unrelated(x):
         self.assertTrue(reverse[0]['oracle_not_available_at_inference'])
         self.assertNotIn('teacher_distance', next(iter(reverse[1]))['features'])
 
+    def test_deep_hop_oracle_probe_is_shortest_and_not_retrieval_seed(self):
+        finish = self.node('/finish')
+        unrelated = self.node('/unrelated_handler')
+        names = sorted(self.symbols)
+        order = [unrelated] + [x for x in names if x != unrelated]
+        with patch('build_navigation_dataset.bm25_rank',
+                   return_value=[(key, float(len(order) - i)) for i, key in enumerate(order)]):
+            result, error = build_case([case_row(finish)], self.symbols, self.edges,
+                                       self.stats, top_k=1, max_hops=8, reverse_hops=5)
+        self.assertIsNone(error)
+        case = result[0]
+        probes = case['deep_hop_probes']
+        self.assertTrue(any(x['hops'] == 3 for x in probes))
+        self.assertTrue(all(x['oracle_only'] for x in probes))
+        self.assertTrue(all(not x['in_initial_top_k'] for x in probes))
+        self.assertEqual(case['case_type'], 'reverse_oracle_probe')
+        self.assertTrue(all(x['hops'] == len(x['nodes']) - 1 for x in probes))
+        self.assertEqual(case['gold_status'], 'static_shortest_path_proxy_not_causal_truth')
+
     def test_reject_bad_pr_and_weak_labels(self):
         finish = self.node('/finish')
         self.assertIsNone(classify(case_row(finish, match=False)))

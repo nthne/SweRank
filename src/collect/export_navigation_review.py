@@ -132,8 +132,46 @@ def export(cases_path, rejected_path, graph_dir, audit_path, output_dir):
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
         writer.writerows(rows)
+    # Separate diagnostic for minimum-length 2-5-hop ancestors; never mix with
+    # the actual retrieval-seeded path distribution or claim these as gold paths.
+    deep_rows = []
+    for c in cases:
+        repo, sha = c['repo'], c['base_commit']
+        graph_file = Path(graph_dir) / (repo.replace('/', '__') + '_' + sha[:12] + '.json')
+        graph = json.loads(graph_file.read_text(encoding='utf-8')) if graph_file.exists() else {}
+        nodes = {n['id']: n for n in graph.get('nodes', [])}
+        etypes = {(e['source'], e['target']): e.get('type', '') for e in graph.get('edges', [])}
+        for p in c.get('deep_hop_probes', []):
+            seq = p['nodes']
+            deep_rows.append({
+                'instance_id': c['instance_id'], 'issue_url': c.get('issue_url', ''),
+                'repo': repo, 'base_commit': sha, 'target': p['target'],
+                'target_quality': c.get('accepted_targets', {}).get(p['target'], ''),
+                'retriever': c.get('retriever', ''), 'top_k': c.get('retrieval_k'),
+                'ancestor': p['ancestor'], 'ancestor_retrieval_rank': p['ancestor_retrieval_rank'],
+                'in_initial_top_k': p['in_initial_top_k'],
+                'hops': p['hops'], 'path_nodes': ' -> '.join(seq),
+                'path_edge_types': ' -> '.join(etypes.get((a,b), 'unknown') for a,b in zip(seq,seq[1:])),
+                'ancestor_source_url': code_url(repo, sha, p['ancestor'], nodes),
+                'target_source_url': code_url(repo, sha, p['target'], nodes),
+                'path_status': 'offline_oracle_probe_shortest_static_path',
+                'is_actual_retrieval_navigation_path': p['in_initial_top_k'],
+                'manual_review': '', 'reviewer_notes': ''
+            })
+    deep_fields = ['instance_id', 'issue_url', 'repo', 'base_commit', 'target', 'target_quality',
+                   'retriever', 'top_k', 'ancestor', 'ancestor_retrieval_rank',
+                   'in_initial_top_k', 'hops', 'path_nodes', 'path_edge_types',
+                   'ancestor_source_url', 'target_source_url', 'path_status',
+                   'is_actual_retrieval_navigation_path', 'manual_review', 'reviewer_notes']
+    with (output / 'deep_hop_path_review.csv').open('w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=deep_fields)
+        writer.writeheader()
+        writer.writerows(deep_rows)
     stats = summarize(cases, rejected)
     stats['manual_review_rows'] = len(rows)
+    stats['deep_hop_diagnostic_paths'] = len(deep_rows)
+    stats['deep_hop_distribution'] = dict(sorted(Counter(str(x['hops']) for x in deep_rows).items()))
+    stats['deep_hop_from_actual_topk'] = sum(x['in_initial_top_k'] for x in deep_rows)
     (output / 'case_hop_statistics.json').write_text(json.dumps(stats, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     (output / 'rejected_issue_summary.json').write_text(json.dumps([
         {'instance_id': x.get('instance_id'), 'reason': x.get('reason'), 'repo': x.get('repo')}

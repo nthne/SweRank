@@ -59,9 +59,9 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       TARGET_REPO: ${{ inputs.repo || '' }}
-      MAX_PRS: ${{ inputs.max_prs || '4' }}
-      TOP_K: ${{ inputs.top_k || '10' }}
-      MAX_LLM_CALLS: ${{ inputs.max_llm_calls || '12' }}
+      MAX_PRS: ${{ inputs.max_prs || '6' }}
+      TOP_K: ${{ inputs.top_k || '5' }}
+      MAX_LLM_CALLS: ${{ inputs.max_llm_calls || '24' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -82,7 +82,7 @@ jobs:
           from build_navigation_dataset import read_manifest
           excluded, digest = read_manifest('nav_outputs/benchmark_manifest.json')
           requested = os.environ['TARGET_REPO'].strip().lower()
-          candidates = [requested] if requested else ['simonw/sqlite-utils', 'agronholm/anyio', 'pallets/itsdangerous', 'django-commons/django-debug-toolbar']
+          candidates = [requested] if requested else ['agronholm/anyio', 'textualize/rich', 'simonw/datasette', 'simonw/sqlite-utils']
           repo = next((v for v in candidates if v not in excluded), None)
           if repo is None:
               raise SystemExit('REJECTED: all proposed repositories appear in evaluation benchmarks')
@@ -103,7 +103,7 @@ jobs:
         run: |
           set -euo pipefail
           python src/collect/enrich_sweloc.py --input nav_outputs/audit/sample_sweloc.jsonl --output-dir nav_outputs/audit --embedding --judge --max-judge-pairs 8 --max-llm-calls "$MAX_LLM_CALLS" --llm-cache nav_outputs/audit/llm_judge_cache.json
-      - name: Create multi-target graph navigation cases
+      - name: Create multi-target graph navigation cases (include 2-5 hop diagnostic probes)
         run: |
           set -euo pipefail
           python src/collect/build_navigation_dataset.py --input nav_outputs/audit/enriched_sweloc.jsonl --output-dir nav_outputs/dataset --benchmark-manifest nav_outputs/benchmark_manifest.json --checkout-root .cache/navigation-checkouts --retriever swerank --top-k "$TOP_K" --max-hops 8 --reverse-hops 5 --store-graphs

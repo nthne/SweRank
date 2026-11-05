@@ -157,6 +157,29 @@ def build_case(rows, symbols, edges, repo_stats, top_k=20, max_hops=8,
                                  'retrieval_score': dict(ranking).get(key)})
         fallback.sort(key=lambda r: (r['retrieval_rank'], r['distance_to_target'], r['node']))
 
+    # For research/manual review, expose genuinely minimal multi-hop caller chains.
+    # This is OFFLINE oracle-only supervision, NEVER a candidate generated at inference.
+    # Do not manufacture extra hops by extending a shorter path.
+    deep_hop_probes = []
+    for target in targets:
+        reverse_dists = distance_to_targets([target], incoming, max_hops=reverse_hops)
+        for distance in range(2, reverse_hops + 1):
+            ancestors = sorted((ranks[node], node) for node, hop in reverse_dists.items()
+                               if hop == distance and node in ranks)
+            for rank, ancestor in ancestors[:5]:
+                paths = shortest_paths(ancestor, target, outgoing,
+                                       max_hops=reverse_hops, max_paths=1)
+                if paths and len(paths[0]) - 1 == distance:
+                    deep_hop_probes.append({
+                        'target': target, 'ancestor': ancestor,
+                        'ancestor_retrieval_rank': rank + 1,
+                        'in_initial_top_k': rank < top_k,
+                        'hops': distance, 'nodes': paths[0],
+                        'oracle_only': True,
+                        'is_actual_retrieval_navigation_path': rank < top_k,
+                        'status': 'static_shortest_path_proxy_not_verified_causal_path'
+                    })
+
     # Oracle fallback is diagnostic and never a claimed inference-time action.
     rescue_seeds = [f['node'] for f in fallback[:1]] if fallback else []
     training_seeds = seeds if case_type != 'reverse_oracle_probe' else rescue_seeds
@@ -258,6 +281,7 @@ def build_case(rows, symbols, edges, repo_stats, top_k=20, max_hops=8,
                                                       default=None) for t in targets},
             'unreached_targets': sorted(set(targets) - set(chosen_seed)),
             'reverse_probe_top': fallback[:50],
+            'deep_hop_probes': deep_hop_probes,
             'reverse_probe_best_rank': fallback[0]['retrieval_rank'] + 1 if fallback else None,
             'oracle_rescue_used_for_training': case_type == 'reverse_oracle_probe' and bool(rescue_seeds),
             'oracle_rescue_seed': rescue_seeds[0] if rescue_seeds else None,

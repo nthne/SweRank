@@ -203,15 +203,31 @@ def bm25_rank(query, symbols):
     return sorted(scored, key=lambda x: (-x[1], x[0]))
 
 
+# Reuse the encoder and the full-repository code embeddings across issues at the same base commit.
+# Cache is process-local; avoid model load + thousands of repeated document encodes per issue.
+_SWERANK_MODELS = {}
+_SWERANK_DOCUMENTS = {}
+
+
 def swerank_rank(query, symbols, model_name='Salesforce/SweRankEmbed-Small'):
-    """Optional CPU/GPU retriever: identical pretrained model family as the audit."""
+    """Rank full repository code without recomputing cached embeddings for each issue."""
     import numpy as np
-    from sentence_transformers import SentenceTransformer
-    model = SentenceTransformer(model_name, trust_remote_code=True)
-    ids = sorted(symbols)
-    descriptions = [symbols[k].path + '\n' + symbols[k].qualname + '\n' + symbols[k].source for k in ids]
+    if model_name not in _SWERANK_MODELS:
+        from sentence_transformers import SentenceTransformer
+        _SWERANK_MODELS[model_name] = SentenceTransformer(model_name, trust_remote_code=True)
+    model = _SWERANK_MODELS[model_name]
+    ids = tuple(sorted(symbols))
+    cache_key = (id(symbols), model_name)
+    cached = _SWERANK_DOCUMENTS.get(cache_key)
+    if cached is None or cached[0] is not symbols or cached[1] != ids:
+        descriptions = [symbols[k].path + '\n' + symbols[k].qualname + '\n' + symbols[k].source for k in ids]
+        d = model.encode(descriptions, batch_size=16, normalize_embeddings=True, show_progress_bar=False)
+        if len(_SWERANK_DOCUMENTS) >= 12:
+            _SWERANK_DOCUMENTS.clear()
+        _SWERANK_DOCUMENTS[cache_key] = (symbols, ids, np.asarray(d))
+    else:
+        d = cached[2]
     q = model.encode([query[:3000]], prompt_name='query', normalize_embeddings=True, show_progress_bar=False)[0]
-    d = model.encode(descriptions, batch_size=8, normalize_embeddings=True, show_progress_bar=False)
     sims = np.asarray(d) @ np.asarray(q)
     return sorted([(key, float(score)) for key, score in zip(ids, sims)], key=lambda x: (-x[1], x[0]))
 
