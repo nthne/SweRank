@@ -37,8 +37,9 @@ def summarize(cases, rejected):
                 best_target_hops[str(min(by_target[t]))] += 1
             else:
                 missing += 1
-        if by_target:
-            best_case_hops[str(min(min(v) for v in by_target.values()))] += 1
+        available_hops = [min(v) for v in by_target.values() if v]
+        if available_hops:
+            best_case_hops[str(min(available_hops))] += 1
         else:
             best_case_hops['unreached'] += 1
     return {
@@ -95,6 +96,8 @@ def export(cases_path, rejected_path, graph_dir, audit_path, output_dir):
         evaluations = {x['positive_id']: x for x in audits.get((instance, sha), [])}
         pr_urls = sorted({x.get('pr_url', '') for x in audits.get((instance, sha), []) if x.get('pr_url')})
         seedranks = {s.get('node'): s.get('rank') for s in c.get('seed_scores', [])}
+        for candidate in c.get('reverse_probe_top', []):
+            seedranks.setdefault(candidate['node'], candidate['retrieval_rank'] + 1)
         listed = list(c.get('gold_paths', []))
         alltargets = c.get('accepted_targets', {})
         for target in sorted(alltargets):

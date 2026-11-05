@@ -1,0 +1,33 @@
+{
+  "accepted_issue_count": 3,
+  "rejected_issue_count": 2,
+  "case_distribution": {
+    "direct_retrieval": {
+      "count": 2,
+      "percentage": 66.67
+    },
+    "retrieval_to_target_path": {
+      "count": 0,
+      "percentage": 0.0
+    },
+    "reverse_oracle_probe": {
+      "count": 1,
+      "percentage": 33.33
+    }
+  },
+  "hop_distribution_proxy_paths": {
+    "0": 2,
+    "1": 1
+  },
+  "hop_distribution_min_per_target": {
+    "0": 2,
+    "1": 1
+  },
+  "hop_distribution_min_per_issue": {
+    "0": 2,
+    "1": 1
+  },
+  "unreached_accepted_target_count": 1,
+  "note": "Proxy graph shortest paths, NOT causally verified path ground truth. In reverse case, path starts from teacher-only oracle rescue; retrieval originally failed.",
+  "manual_review_rows": 4
+}

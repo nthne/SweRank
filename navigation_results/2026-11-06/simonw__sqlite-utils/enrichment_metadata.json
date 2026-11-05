@@ -1,0 +1,20 @@
+{
+  "llm_usage": {
+    "api_calls": 8,
+    "cache_hits": 0,
+    "input_tokens": 14199,
+    "output_tokens": 2139,
+    "reviewed": 51,
+    "skipped_budget": 0,
+    "skipped_large_group": 0,
+    "errors": 0
+  },
+  "created_utc": "2026-11-05T22:28:53.937081+00:00",
+  "samples": 51,
+  "semantic_computed": 51,
+  "semantic_errors": 0,
+  "llm_completed": 51,
+  "llm_skipped_no_key": 0,
+  "llm_errors": 0,
+  "notice": "LLM labels and modified functions are unverified, not causal gold truth"
+}

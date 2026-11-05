@@ -1,0 +1,19 @@
+{
+  "created_utc": "2026-11-05T22:42:55.927075+00:00",
+  "manifest_sha256": "df4007dcc07c39f13caf3e320a5e4d77d39bb2fbe3472a28bdf48bdf90c048e6",
+  "excluded_repository_count": 171,
+  "input_rows": 51,
+  "eligible_issues": 5,
+  "cases": 3,
+  "rejected_cases": 2,
+  "training_steps": 1,
+  "supervised_steps": 1,
+  "seed_examples": 30,
+  "stop_examples": 4,
+  "case_distribution": {
+    "direct_retrieval": 2,
+    "retrieval_to_target_path": 0,
+    "reverse_oracle_probe": 1
+  },
+  "warning": "Proxy paths and pseudo targets are NOT verified causal ground truth."
+}
