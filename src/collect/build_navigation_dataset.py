@@ -55,19 +55,30 @@ def read_manifest(path):
 
 
 def get_checkout(repo, base, root):
+    """Reuse one blobless bare clone per repository and pin worktrees to base SHAs.
+
+    This avoids cloning the full Git history once for *every* issue/PR.
+    No repository code or hooks are executed.
+    """
     if not REPO_PATTERN.fullmatch(repo) or not SHA_PATTERN.fullmatch(base):
         raise ValueError('Invalid repo or full commit SHA')
-    checkout = Path(root) / repo.replace('/', '__') / base
+    root = Path(root).resolve()
+    slug = repo.replace('/', '__')
+    checkout = root / slug / base
     if (checkout / '.git').exists():
         return checkout
+    bare = root / '.object-cache' / (slug + '.git')
+    bare.parent.mkdir(parents=True, exist_ok=True)
+    if not bare.exists():
+        subprocess.run(['git', 'clone', '--quiet', '--bare', '--filter=blob:none',
+                        'https://github.com/' + repo + '.git', str(bare)],
+                       check=True, timeout=360)
     checkout.parent.mkdir(parents=True, exist_ok=True)
-    # Public source only; do not execute repo tests/install hooks. Commit is pinned to pre-fix snapshot.
-    subprocess.run(['git', 'clone', '--quiet', '--no-checkout',
-                    'https://github.com/' + repo + '.git', str(checkout)], check=True, timeout=240)
-    subprocess.run(['git', '-C', str(checkout), 'checkout', '--quiet', '--detach', base],
-                   check=True, timeout=120)
+    # `worktree add` uses a pinned commit from the shared bare repository.
+    # An unavailable SHA is a build error, not a reason to fall back to HEAD.
+    subprocess.run(['git', '-C', str(bare), 'worktree', 'add', '--quiet',
+                    '--detach', str(checkout), base], check=True, timeout=240)
     return checkout
-
 
 def classify(row):
     """LLM is provisional, reviewer evidence can elevate a target to verified."""
