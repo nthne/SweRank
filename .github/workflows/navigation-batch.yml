@@ -1,0 +1,195 @@
+name: Batch Graph Navigation Dataset (benchmark-disjoint)
+on:
+  push:
+    branches: ['feature/issue-graph-navigation-dataset']
+    paths:
+      - '.github/workflows/navigation-batch.yml'
+  workflow_dispatch:
+    inputs:
+      max_prs:
+        description: 'Max merged issue-linked PRs per repo'
+        default: '12'
+        required: true
+        type: string
+      max_llm_calls:
+        description: 'Maximum offline LLM judge requests per repo'
+        default: '24'
+        required: true
+        type: string
+      top_k:
+        description: 'Retrieval seed count'
+        default: '10'
+        required: true
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: graph-navigation-batch-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Unit tests (existing + batch)
+        run: |
+          python -m unittest discover -s tests -p 'test_navigation_dataset.py' -v
+          python -m unittest discover -s tests -p 'test_navigation_batch.py' -v
+  exclusions:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Fetch BOTH official benchmark repository exclusions
+        run: |
+          python -m pip install 'datasets>=3.6,<5' 'pyarrow>=18,<24'
+          python src/collect/build_benchmark_manifest.py --output benchmark_manifest.json
+          PYTHONPATH=src/collect python - <<'PY'
+          from build_navigation_dataset import read_manifest
+          repos, sha = read_manifest('benchmark_manifest.json')
+          print('Excluded repositories:', len(repos), 'manifest sha256:', sha)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nav-benchmark-exclusions
+          path: benchmark_manifest.json
+          retention-days: 30
+  crawl:
+    needs: exclusions
+    runs-on: ubuntu-latest
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        include:
+          - {repo: 'simonw/datasette', slug: 'simonw__datasette'}
+          - {repo: 'Textualize/rich', slug: 'Textualize__rich'}
+          - {repo: 'pypa/packaging', slug: 'pypa__packaging'}
+          - {repo: 'pallets/itsdangerous', slug: 'pallets__itsdangerous'}
+          - {repo: 'django-commons/django-debug-toolbar', slug: 'django-commons__django-debug-toolbar'}
+          - {repo: 'encode/httpx', slug: 'encode__httpx'}
+          - {repo: 'pallets/werkzeug', slug: 'pallets__werkzeug'}
+          - {repo: 'pypa/build', slug: 'pypa__build'}
+          - {repo: 'fastapi/fastapi', slug: 'fastapi__fastapi'}
+    env:
+      TARGET_REPO: ${{ matrix.repo }}
+      GITHUB_TOKEN: ${{ github.token }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      MAX_PRS: ${{ inputs.max_prs || '12' }}
+      MAX_LLM_CALLS: ${{ inputs.max_llm_calls || '24' }}
+      TOP_K: ${{ inputs.top_k || '10' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: nav-benchmark-exclusions
+          path: nav_outputs/
+      - name: Fail-closed benchmark disjoint guard
+        run: |
+          set -euo pipefail
+          PYTHONPATH=src/collect python - <<'PY'
+          import os
+          from build_navigation_dataset import read_manifest
+          exclusions, sha = read_manifest('nav_outputs/benchmark_manifest.json')
+          repo = os.environ['TARGET_REPO'].lower()
+          if repo in exclusions:
+              raise SystemExit(f'FAIL CLOSED: {repo} appears in SWE-bench or LocBench!')
+          print('PASSED:', repo, 'exclusion manifest:', sha)
+          PY
+      - name: Crawl real merged issue-linked PRs
+        run: |
+          set -euo pipefail
+          python src/collect/sample_sweloc.py --repo "$TARGET_REPO" --max-prs "$MAX_PRS" --allow-no-test --output-dir nav_outputs/audit
+          test -s nav_outputs/audit/sample_sweloc.jsonl
+      - name: LLM judge only (offline, capped requests, no remote embeddings)
+        run: |
+          set -euo pipefail
+          test -n "$OPENAI_API_KEY" || { echo '::error::OPENAI_API_KEY missing'; exit 1; }
+          python src/collect/enrich_sweloc.py --input nav_outputs/audit/sample_sweloc.jsonl --output-dir nav_outputs/audit --judge --max-judge-pairs 8 --max-llm-calls "$MAX_LLM_CALLS" --llm-cache nav_outputs/audit/llm_judge_cache.json
+      - name: Build function graph + BM25 exploration seeds at base commit
+        run: |
+          set -euo pipefail
+          set +e
+          python src/collect/build_navigation_dataset.py --input nav_outputs/audit/enriched_sweloc.jsonl --output-dir nav_outputs/dataset --benchmark-manifest nav_outputs/benchmark_manifest.json --checkout-root .cache/navigation-checkouts --retriever bm25 --top-k "$TOP_K" --max-hops 8 --reverse-hops 5 --store-graphs
+          rc=$?
+          set -e
+          if [[ $rc -ne 0 ]]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('nav_outputs/dataset/summary.json')
+          if not p.exists() or json.loads(p.read_text()).get('cases') != 0:
+              raise SystemExit('Graph dataset failed for nonempty result')
+          print('No accepted targets survived the weak-label screen; reporting rejects, not fabricating gold')
+          PY
+          fi
+      - name: Export manual review, paths and hop stats
+        run: |
+          python src/collect/export_navigation_review.py --cases nav_outputs/dataset/navigation_cases.jsonl --rejected nav_outputs/dataset/rejected_cases.jsonl --graphs nav_outputs/dataset/graphs --audit nav_outputs/audit/enriched_sweloc.jsonl --output-dir nav_outputs/dataset
+      - name: Upload all per-repo code graph and audit snapshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nav-repo-${{ matrix.slug }}
+          path: nav_outputs/
+          retention-days: 30
+          if-no-files-found: warn
+  aggregate:
+    needs: crawl
+    if: always() && needs.crawl.result != 'cancelled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nav-repo-*
+          path: batch_artifacts/
+          merge-multiple: false
+      - name: Combine real cases, all rejects, training edges and path reviews
+        run: |
+          python src/collect/aggregate_navigation_batch.py --artifacts-root batch_artifacts --output-dir batch_summary --expected-repos 9
+      - name: Save combined snapshot on feature branch
+        run: |
+          set -euo pipefail
+          TODAY="$(TZ=Asia/Bangkok date +%F)"
+          OUT="navigation_results/$TODAY/multi_repo_batch"
+          mkdir -p "$OUT"
+          cp batch_summary/* "$OUT/"
+          python - "$OUT" <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          p=Path(sys.argv[1])/'batch_summary.json'
+          a=json.loads(p.read_text())
+          a.update({'workflow_run_id':os.environ['GITHUB_RUN_ID'], 'source_commit':os.environ['GITHUB_SHA']})
+          p.write_text(json.dumps(a,ensure_ascii=False,indent=2)+'\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin feature/issue-graph-navigation-dataset
+          git reset --mixed origin/feature/issue-graph-navigation-dataset
+          git add -f -- "$OUT"
+          if ! git diff --cached --quiet; then
+            git commit -m "data: batch 9 benchmark-disjoint repos [skip ci]"
+            git push origin HEAD:feature/issue-graph-navigation-dataset
+          fi
+      - name: Upload combined batch outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navigation-batch-combined-${{ github.run_id }}
+          path: batch_summary/
+          if-no-files-found: warn
+          retention-days: 30

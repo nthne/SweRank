@@ -1,0 +1,151 @@
+name: Graph Navigation Dataset
+on:
+  push:
+    branches: ['feature/issue-graph-navigation-dataset']
+    paths:
+      - '.github/workflows/navigation-dataset.yml'
+  pull_request:
+    paths:
+      - 'src/collect/navigation_graph.py'
+      - 'src/collect/build_navigation_dataset.py'
+      - 'src/collect/build_benchmark_manifest.py'
+      - 'src/collect/train_navigation_scorer.py'
+      - 'src/collect/infer_navigation.py'
+      - 'tests/test_navigation_dataset.py'
+      - '.github/workflows/navigation-dataset.yml'
+      - 'src/collect/export_navigation_review.py'
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: Public owner/repo for NEW training issues (must be absent from evaluation benchmarks)
+        required: true
+        type: string
+      max_prs:
+        description: Max merged issue-linked PRs to process
+        required: true
+        default: '3'
+        type: string
+      top_k:
+        description: Initial retrieved function seeds
+        required: true
+        default: '20'
+        type: string
+      max_llm_calls:
+        description: Offline LLM audit budget (no inference-time calls)
+        required: true
+        default: '20'
+        type: string
+permissions:
+  contents: write
+concurrency:
+  group: graph-navigation-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Navigation unit tests
+        run: python -m unittest discover -s tests -p test_navigation_dataset.py -v
+  build:
+    if: (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') || (github.event_name == 'push' && github.ref == 'refs/heads/feature/issue-graph-navigation-dataset')
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      TARGET_REPO: ${{ inputs.repo || '' }}
+      MAX_PRS: ${{ inputs.max_prs || '6' }}
+      TOP_K: ${{ inputs.top_k || '5' }}
+      MAX_LLM_CALLS: ${{ inputs.max_llm_calls || '24' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install benchmark reader and embedding dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install 'datasets>=3.6,<5' 'pyarrow>=18,<24' 'einops>=0.8'
+          python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install sentence-transformers==3.4.1 transformers==4.51.3
+      - name: Build STRICT repository-disjoint benchmark exclusions
+        run: |
+          set -euo pipefail
+          python src/collect/build_benchmark_manifest.py --output nav_outputs/benchmark_manifest.json
+          PYTHONPATH=src/collect python - <<'PY'
+          import os, sys
+          from build_navigation_dataset import read_manifest
+          excluded, digest = read_manifest('nav_outputs/benchmark_manifest.json')
+          requested = os.environ['TARGET_REPO'].strip().lower()
+          candidates = [requested] if requested else ['agronholm/anyio', 'textualize/rich', 'simonw/datasette', 'simonw/sqlite-utils']
+          repo = next((v for v in candidates if v not in excluded), None)
+          if repo is None:
+              raise SystemExit('REJECTED: all proposed repositories appear in evaluation benchmarks')
+          if requested and repo != requested:
+              raise SystemExit('REJECTED: explicit repository appears in evaluation benchmarks')
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write(f'TARGET_REPO={repo}\n')
+          print(f'Allowed repo: {repo}; benchmark manifest SHA256: {digest}; excluded repos: {len(excluded)}')
+          PY
+      - name: Crawl issue-linked merged PRs
+        run: |
+          set -euo pipefail
+          python src/collect/sample_sweloc.py --repo "$TARGET_REPO" --max-prs "$MAX_PRS" --allow-no-test --output-dir nav_outputs/audit
+      - name: Validate offline LLM budget
+        run: |
+          test -n "$OPENAI_API_KEY" || { echo 'OPENAI_API_KEY secret is required for pseudo-label audit'; exit 1; }
+      - name: Enrich and screen weak PR labels (training only)
+        run: |
+          set -euo pipefail
+          python src/collect/enrich_sweloc.py --input nav_outputs/audit/sample_sweloc.jsonl --output-dir nav_outputs/audit --embedding --judge --max-judge-pairs 8 --max-llm-calls "$MAX_LLM_CALLS" --llm-cache nav_outputs/audit/llm_judge_cache.json
+      - name: Create multi-target graph navigation cases (include 2-5 hop diagnostic probes)
+        run: |
+          set -euo pipefail
+          python src/collect/build_navigation_dataset.py --input nav_outputs/audit/enriched_sweloc.jsonl --output-dir nav_outputs/dataset --benchmark-manifest nav_outputs/benchmark_manifest.json --checkout-root .cache/navigation-checkouts --retriever swerank --top-k "$TOP_K" --max-hops 8 --reverse-hops 5 --store-graphs
+      - name: Export manual path review and case/hop statistics
+        run: |
+          set -euo pipefail
+          python src/collect/export_navigation_review.py --cases nav_outputs/dataset/navigation_cases.jsonl --rejected nav_outputs/dataset/rejected_cases.jsonl --graphs nav_outputs/dataset/graphs --audit nav_outputs/audit/enriched_sweloc.jsonl --output-dir nav_outputs/dataset
+      - name: Try train inexpensive baseline scorer (optional)
+        run: |
+          set -euo pipefail
+          python src/collect/train_navigation_scorer.py --input nav_outputs/dataset/navigation_steps.jsonl --stop-input nav_outputs/dataset/stop_training.jsonl --output nav_outputs/dataset/edge_scorer.json || echo 'Insufficient balanced graph steps; dataset still valid, add more repositories.'
+      - name: Save navigational dataset snapshot
+        run: |
+          set -euo pipefail
+          TODAY="$(TZ=Asia/Bangkok date +%F)"
+          REPO_NAME="${TARGET_REPO//\//__}"
+          OUT="navigation_results/$TODAY/$REPO_NAME"
+          mkdir -p "$OUT"
+          cp nav_outputs/dataset/*.jsonl nav_outputs/dataset/*.json nav_outputs/dataset/*.csv "$OUT/"
+          cp nav_outputs/benchmark_manifest.json "$OUT/"
+          python - "$OUT" <<'PY'
+          import json, os, pathlib, sys
+          p=pathlib.Path(sys.argv[1])
+          d=json.loads((p/'summary.json').read_text())
+          d['workflow_run_id']=os.environ['GITHUB_RUN_ID']
+          d['source_commit']=os.environ['GITHUB_SHA']
+          (p/'summary.json').write_text(json.dumps(d, indent=2, ensure_ascii=False)+'\n')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          TARGET_BRANCH="${GITHUB_REF_NAME}"
+          git fetch origin "$TARGET_BRANCH"
+          git reset --mixed "origin/$TARGET_BRANCH"
+          git add -f -- "$OUT"
+          if ! git diff --cached --quiet; then
+            git commit -m "data: graph navigation dataset $TODAY $REPO_NAME [skip ci]"
+            git push origin "HEAD:$TARGET_BRANCH"
+          fi
+      - name: Upload full snapshot (including graph nodes/edges and audit)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: navigation-dataset-${{ github.run_id }}
+          path: nav_outputs/
+          if-no-files-found: warn

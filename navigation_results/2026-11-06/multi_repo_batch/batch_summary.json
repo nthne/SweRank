@@ -1,0 +1,269 @@
+{
+  "generated_utc": "2026-11-06T03:06:27.730109+00:00",
+  "dataset_quality": "llm_pseudo_static_shortest_path_proxy_not_verified_gold",
+  "benchmark_manifest_sha256": "66497aa61f87d6f3e22a230516f7a8ff3ab648c9025c3878157a1f60db8d1e33",
+  "expected_repository_count": 9,
+  "completed_repository_count": 9,
+  "repositories": {
+    "Textualize/rich": {
+      "issues": 10,
+      "accepted_cases": 8,
+      "rejected_cases": 2,
+      "weak_functions": 22,
+      "case_distribution": {
+        "direct_retrieval": 4,
+        "retrieval_to_target_path": 0,
+        "reverse_oracle_probe": 4
+      },
+      "deep_hop_diagnostic_paths": 3,
+      "max_hop": 3,
+      "benchmark_manifest_sha256": "66497aa61f87d6f3e22a230516f7a8ff3ab648c9025c3878157a1f60db8d1e33"
+    },
+    "django-commons/django-debug-toolbar": {
+      "issues": 6,
+      "accepted_cases": 4,
+      "rejected_cases": 2,
+      "weak_functions": 17,
+      "case_distribution": {
+        "direct_retrieval": 2,
+        "retrieval_to_target_path": 1,
+        "reverse_oracle_probe": 1
+      },
+      "deep_hop_diagnostic_paths": 0,
+      "max_hop": 0,
+      "benchmark_manifest_sha256": "66497aa61f87d6f3e22a230516f7a8ff3ab648c9025c3878157a1f60db8d1e33"
+    },
+    "encode/httpx": {
+      "issues": 8,
+      "accepted_cases": 7,
+      "rejected_cases": 1,
+      "weak_functions": 96,
+      "case_distribution": {
+        "direct_retrieval": 7,
+        "retrieval_to_target_path": 0,
+        "reverse_oracle_probe": 0
+      },
+      "deep_hop_diagnostic_paths": 0,
+      "max_hop": 0,
+      "benchmark_manifest_sha256": "66497aa61f87d6f3e22a230516f7a8ff3ab648c9025c3878157a1f60db8d1e33"
+    },
+    "fastapi/fastapi": {
+      "issues": 1,
+      "accepted_cases": 1,
+      "rejected_cases": 0,
+      "weak_functions": 9,
+      "case_distribution": {
+        "direct_retrieval": 0,
+        "retrieval_to_target_path": 0,
+        "reverse_oracle_probe": 1
+      },
+      "deep_hop_diagnostic_paths": 0,
+      "max_hop": 0,
+      "benchmark_manifest_sha256": "66497aa61f87d6f3e22a230516f7a8ff3ab648c9025c3878157a1f60db8d1e33"
+    },
+    "pallets/itsdangerous": {
+      "issues": 9,
+      "accepted_cases": 7,
+      "rejected_cases": 2,
+      "weak_functions": 108,
+      "case_distribution": {
+        "direct_retrieval": 7,
+        "retrieval_to_target_path": 0,
+        "reverse_oracle_probe": 0
+      },
+      "deep_hop_diagnostic_paths": 34,
+      "max_hop": 4,
+      "benchmark_manifest_sha256": "66497aa61f87d6f3e22a230516f7a8ff3ab648c9025c3878157a1f60db8d1e33"
+    },
+    "pallets/werkzeug": {
+      "issues": 12,
+      "accepted_cases": 6,
+      "rejected_cases": 6,
+      "weak_functions": 250,
+      "case_distribution": {
+        "direct_retrieval": 5,
+        "retrieval_to_target_path": 0,
+        "reverse_oracle_probe": 1
+      },
+      "deep_hop_diagnostic_paths": 56,
+      "max_hop": 5,
+      "benchmark_manifest_sha256": "66497aa61f87d6f3e22a230516f7a8ff3ab648c9025c3878157a1f60db8d1e33"
+    },
+    "pypa/build": {
+      "issues": 12,
+      "accepted_cases": 0,
+      "rejected_cases": 12,
+      "weak_functions": 55,
+      "case_distribution": {
+        "direct_retrieval": 0,
+        "retrieval_to_target_path": 0,
+        "reverse_oracle_probe": 0
+      },
+      "deep_hop_diagnostic_paths": 0,
+      "max_hop": 0,
+      "benchmark_manifest_sha256": "66497aa61f87d6f3e22a230516f7a8ff3ab648c9025c3878157a1f60db8d1e33"
+    },
+    "pypa/packaging": {
+      "issues": 10,
+      "accepted_cases": 4,
+      "rejected_cases": 6,
+      "weak_functions": 23,
+      "case_distribution": {
+        "direct_retrieval": 3,
+        "retrieval_to_target_path": 0,
+        "reverse_oracle_probe": 1
+      },
+      "deep_hop_diagnostic_paths": 5,
+      "max_hop": 2,
+      "benchmark_manifest_sha256": "66497aa61f87d6f3e22a230516f7a8ff3ab648c9025c3878157a1f60db8d1e33"
+    },
+    "simonw/datasette": {
+      "issues": 11,
+      "accepted_cases": 10,
+      "rejected_cases": 1,
+      "weak_functions": 27,
+      "case_distribution": {
+        "direct_retrieval": 5,
+        "retrieval_to_target_path": 1,
+        "reverse_oracle_probe": 4
+      },
+      "deep_hop_diagnostic_paths": 5,
+      "max_hop": 2,
+      "benchmark_manifest_sha256": "66497aa61f87d6f3e22a230516f7a8ff3ab648c9025c3878157a1f60db8d1e33"
+    }
+  },
+  "total_issues": 79,
+  "accepted_cases": 47,
+  "rejected_cases": 32,
+  "weak_function_pairs": 607,
+  "case_distribution": {
+    "direct_retrieval": {
+      "count": 33,
+      "percentage": 70.21
+    },
+    "retrieval_to_target_path": {
+      "count": 2,
+      "percentage": 4.26
+    },
+    "reverse_oracle_probe": {
+      "count": 12,
+      "percentage": 25.53
+    }
+  },
+  "selected_proxy_path_hops": {
+    "0": 57,
+    "1": 18,
+    "2": 9,
+    "3": 2,
+    "4": 1
+  },
+  "deep_probe_path_hops": {
+    "2": 60,
+    "3": 29,
+    "4": 11,
+    "5": 3
+  },
+  "selected_proxy_path_count": 87,
+  "deep_oracle_probe_paths": 103,
+  "human_verified_targets": 0,
+  "llm_pseudo_targets": 164,
+  "navigation_steps": 56,
+  "seed_samples": 470,
+  "stop_samples": 99,
+  "manual_review_rows": 164,
+  "audit_usage": {
+    "Textualize/rich": {
+      "api_calls": 10,
+      "cache_hits": 0,
+      "input_tokens": 12949,
+      "output_tokens": 1056,
+      "reviewed": 22,
+      "skipped_budget": 0,
+      "skipped_large_group": 0,
+      "errors": 0
+    },
+    "django-commons/django-debug-toolbar": {
+      "api_calls": 6,
+      "cache_hits": 0,
+      "input_tokens": 8748,
+      "output_tokens": 759,
+      "reviewed": 17,
+      "skipped_budget": 0,
+      "skipped_large_group": 0,
+      "errors": 0
+    },
+    "encode/httpx": {
+      "api_calls": 16,
+      "cache_hits": 0,
+      "input_tokens": 32624,
+      "output_tokens": 4108,
+      "reviewed": 96,
+      "skipped_budget": 0,
+      "skipped_large_group": 0,
+      "errors": 0
+    },
+    "fastapi/fastapi": {
+      "api_calls": 2,
+      "cache_hits": 0,
+      "input_tokens": 3335,
+      "output_tokens": 351,
+      "reviewed": 9,
+      "skipped_budget": 0,
+      "skipped_large_group": 0,
+      "errors": 0
+    },
+    "pallets/itsdangerous": {
+      "api_calls": 20,
+      "cache_hits": 0,
+      "input_tokens": 33905,
+      "output_tokens": 4145,
+      "reviewed": 108,
+      "skipped_budget": 0,
+      "skipped_large_group": 0,
+      "errors": 0
+    },
+    "pallets/werkzeug": {
+      "api_calls": 24,
+      "cache_hits": 0,
+      "input_tokens": 45132,
+      "output_tokens": 6561,
+      "reviewed": 169,
+      "skipped_budget": 81,
+      "skipped_large_group": 0,
+      "errors": 0
+    },
+    "pypa/build": {
+      "api_calls": 14,
+      "cache_hits": 0,
+      "input_tokens": 21092,
+      "output_tokens": 2303,
+      "reviewed": 55,
+      "skipped_budget": 0,
+      "skipped_large_group": 0,
+      "errors": 0
+    },
+    "pypa/packaging": {
+      "api_calls": 10,
+      "cache_hits": 0,
+      "input_tokens": 14716,
+      "output_tokens": 1158,
+      "reviewed": 23,
+      "skipped_budget": 0,
+      "skipped_large_group": 0,
+      "errors": 0
+    },
+    "simonw/datasette": {
+      "api_calls": 11,
+      "cache_hits": 0,
+      "input_tokens": 14093,
+      "output_tokens": 1293,
+      "reviewed": 27,
+      "skipped_budget": 0,
+      "skipped_large_group": 0,
+      "errors": 0
+    }
+  },
+  "note": "Paths are static shortest-path proxies, not verified causal ground truth. Deep probes can be oracle-only.",
+  "workflow_run_id": "42153623735",
+  "source_commit": "d2fb6091111c5a38255713f3a44c08bb5aaa0adb"
+}

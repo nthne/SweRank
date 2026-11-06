@@ -1,0 +1,17 @@
+[
+  {
+    "instance_id": "agronholm__anyio-123",
+    "reason": "no_eligible_targets",
+    "repo": "agronholm/anyio"
+  },
+  {
+    "instance_id": "agronholm__anyio-1342",
+    "reason": "no_eligible_targets",
+    "repo": "agronholm/anyio"
+  },
+  {
+    "instance_id": "agronholm__anyio-123",
+    "reason": "no_eligible_targets",
+    "repo": "agronholm/anyio"
+  }
+]
