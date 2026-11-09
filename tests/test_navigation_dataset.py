@@ -86,24 +86,32 @@ def unrelated(x):
 
         with patch('build_navigation_dataset.bm25_rank', return_value=ranking_with_first(finish)):
             direct, err = build_case([case_row(finish)], self.symbols, self.edges,
-                                     self.stats, top_k=1)
+                                     self.stats, top_k=1, retriever='bm25')
         self.assertIsNone(err)
         self.assertEqual(direct[0]['case_type'], 'direct_retrieval')
         self.assertEqual(direct[0]['target_hops_from_selected_seed'][finish], 0)
+        self.assertEqual(direct[0]['reported_localization_hops'], 0)
+        self.assertEqual(direct[0]['deep_hop_probes'], [])
+        self.assertEqual(direct[0]['oracle_paths'], [])
 
         with patch('build_navigation_dataset.bm25_rank', return_value=ranking_with_first(handler)):
             linked, err = build_case([case_row(finish)], self.symbols, self.edges,
-                                     self.stats, top_k=1)
+                                     self.stats, top_k=1, retriever='bm25')
         self.assertIsNone(err)
         self.assertEqual(linked[0]['case_type'], 'retrieval_to_target_path')
         self.assertEqual(linked[0]['target_hops_from_selected_seed'][finish], 1)
+        self.assertEqual(linked[0]['reported_localization_hops'], 1)
+        self.assertEqual(linked[0]['deep_hop_probes'], [])
 
         with patch('build_navigation_dataset.bm25_rank', return_value=ranking_with_first(unrelated)):
             reverse, err = build_case([case_row(finish)], self.symbols, self.edges,
-                                      self.stats, top_k=1, reverse_hops=5)
+                                      self.stats, top_k=1, reverse_hops=5, retriever='bm25')
         self.assertIsNone(err)
         self.assertEqual(reverse[0]['case_type'], 'reverse_oracle_probe')
         self.assertTrue(reverse[0]['oracle_rescue_used_for_training'])
+        self.assertEqual(reverse[0]['gold_paths'], [])
+        self.assertIsNone(reverse[0]['reported_localization_hops'])
+        self.assertTrue(reverse[0]['oracle_paths'])
         self.assertGreater(reverse[0]['reverse_probe_best_rank'], 1)
         self.assertTrue(reverse[0]['oracle_not_available_at_inference'])
         self.assertNotIn('teacher_distance', next(iter(reverse[1]))['features'])
@@ -116,11 +124,14 @@ def unrelated(x):
         with patch('build_navigation_dataset.bm25_rank',
                    return_value=[(key, float(len(order) - i)) for i, key in enumerate(order)]):
             result, error = build_case([case_row(finish)], self.symbols, self.edges,
-                                       self.stats, top_k=1, max_hops=8, reverse_hops=5)
+                                       self.stats, top_k=1, max_hops=8, reverse_hops=5, retriever='bm25')
         self.assertIsNone(error)
         case = result[0]
         probes = case['deep_hop_probes']
         self.assertTrue(any(x['hops'] == 3 for x in probes))
+        self.assertFalse(case['gold_paths'])
+        self.assertTrue(case['oracle_paths'])
+        self.assertIsNone(case['reported_localization_hops'])
         self.assertTrue(all(x['oracle_only'] for x in probes))
         self.assertTrue(all(not x['in_initial_top_k'] for x in probes))
         self.assertEqual(case['case_type'], 'reverse_oracle_probe')
@@ -184,11 +195,11 @@ def unrelated(x):
 
     def test_review_summary_handles_unreached_multiple_targets(self):
         cases = [{'case_type': 'reverse_oracle_probe', 'accepted_targets': {'target_a': 'llm_pseudo', 'target_b': 'llm_pseudo'},
-                  'gold_paths': [{'target': 'target_a', 'seed': 'seed', 'nodes': ['seed', 'target_a'], 'hops': 1}]}]
+                  'gold_paths': [], 'oracle_paths': [{'target': 'target_a', 'seed': 'seed', 'nodes': ['seed', 'target_a'], 'hops': 1}]}]
         result = summarize(cases, [])
-        self.assertEqual(result['unreached_accepted_target_count'], 1)
-        self.assertEqual(result['hop_distribution_min_per_issue'], {'1': 1})
-        self.assertEqual(result['hop_distribution_min_per_target'], {'1': 1})
+        self.assertEqual(result['unreached_accepted_target_count'], 2)
+        self.assertEqual(result['hop_distribution_min_per_issue'], {'unreached': 1})
+        self.assertEqual(result['hop_distribution_min_per_target'], {})
 
     def test_scorer_no_teacher_feature_leakage(self):
         feat = {k: .2 for k in __import__('build_navigation_dataset').FEATURES}
