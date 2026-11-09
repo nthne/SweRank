@@ -120,7 +120,7 @@ def features(current, candidate, hop, edge_type, relevance, ranks, outgoing, inc
 
 
 def build_case(rows, symbols, edges, repo_stats, top_k=20, max_hops=8,
-               reverse_hops=5, retriever='bm25'):
+               reverse_hops=5, retriever='swerank'):
     first = rows[0]
     issue = first['query']
     candidates = {}
@@ -168,53 +168,72 @@ def build_case(rows, symbols, edges, repo_stats, top_k=20, max_hops=8,
                                  'retrieval_score': dict(ranking).get(key)})
         fallback.sort(key=lambda r: (r['retrieval_rank'], r['distance_to_target'], r['node']))
 
-    # For research/manual review, expose genuinely minimal multi-hop caller chains.
-    # This is OFFLINE oracle-only supervision, NEVER a candidate generated at inference.
-    # Do not manufacture extra hops by extending a shorter path.
+    # Strict issue-level precedence: Case 1 > Case 2 > Case 3.
+    # A direct hit is ALWAYS reported as zero-hop localization, even when
+    # unrelated callers can be traced back to the same target.
+    # A reverse oracle is ONLY permitted when there is neither a direct
+    # target nor any Top-K-to-target graph path.
     deep_hop_probes = []
-    for target in targets:
-        reverse_dists = distance_to_targets([target], incoming, max_hops=reverse_hops)
-        for distance in range(2, reverse_hops + 1):
-            ancestors = sorted((ranks[node], node) for node, hop in reverse_dists.items()
-                               if hop == distance and node in ranks)
-            for rank, ancestor in ancestors[:5]:
-                paths = shortest_paths(ancestor, target, outgoing,
-                                       max_hops=reverse_hops, max_paths=1)
-                if paths and len(paths[0]) - 1 == distance:
-                    deep_hop_probes.append({
-                        'target': target, 'ancestor': ancestor,
-                        'ancestor_retrieval_rank': rank + 1,
-                        'in_initial_top_k': rank < top_k,
-                        'hops': distance, 'nodes': paths[0],
-                        'oracle_only': True,
-                        'is_actual_retrieval_navigation_path': rank < top_k,
-                        'status': 'static_shortest_path_proxy_not_verified_causal_path'
-                    })
+    if case_type == 'reverse_oracle_probe':
+        for target in targets:
+            reverse_dists = distance_to_targets([target], incoming, max_hops=reverse_hops)
+            for distance in range(2, reverse_hops + 1):
+                ancestors = sorted((ranks[node], node) for node, hop in reverse_dists.items()
+                                   if hop == distance and node in ranks and node not in seeds)
+                for rank, ancestor in ancestors[:5]:
+                    paths = shortest_paths(ancestor, target, outgoing, max_hops=reverse_hops, max_paths=1)
+                    if paths and len(paths[0]) - 1 == distance:
+                        deep_hop_probes.append({
+                            'target': target, 'ancestor': ancestor,
+                            'ancestor_retrieval_rank': rank + 1,
+                            'in_initial_top_k': False,
+                            'hops': distance, 'nodes': paths[0],
+                            'oracle_only': True, 'is_actual_retrieval_navigation_path': False,
+                            'status': 'case3_reverse_oracle_proxy_not_localization'
+                        })
 
-    # Oracle fallback is diagnostic and never a claimed inference-time action.
-    rescue_seeds = [f['node'] for f in fallback[:1]] if fallback else []
-    training_seeds = seeds if case_type != 'reverse_oracle_probe' else rescue_seeds
-    gold_paths, chosen_seed = [], {}
+    # Primary localization paths and teacher-only reverse paths MUST remain
+    # disjoint: Case 3 has zero successful retrieval-seeded localization paths.
+    gold_paths, oracle_paths, chosen_seed = [], [], {}
     for target in targets:
-        possibilities = [(target, [[target]])] if target in seeds else []
-        for seed in ([] if target in seeds else training_seeds):
-            paths = shortest_paths(seed, target, outgoing, max_hops=max_hops)
-            if paths:
-                possibilities.append((seed, paths))
-        if possibilities:
-            # Choose a seed by issue relevance first, then use shortest graph paths.
-            seed, paths = min(possibilities, key=lambda x: (-relevance[x[0]], len(x[1][0]), x[0]))
-            chosen_seed[target] = seed
-            gold_paths.extend({'target': target, 'seed': seed, 'nodes': path,
-                               'hops': len(path) - 1} for path in paths)
+        if case_type == 'direct_retrieval':
+            if target in seeds:
+                chosen_seed[target] = target
+                gold_paths.append({'target': target, 'seed': target, 'nodes': [target], 'hops': 0})
+        elif case_type == 'retrieval_to_target_path':
+            choices = []
+            for seed in seeds:
+                for path in shortest_paths(seed, target, outgoing, max_hops=max_hops, max_paths=8):
+                    if len(path) > 1:
+                        choices.append((seed, path))
+            if choices:
+                # Report the minimum number of code-graph edges, not a longer
+                # path just because its starting node ranked slightly higher.
+                seed, best_path = min(choices, key=lambda x: (len(x[1]), -relevance[x[0]], x[0], x[1]))
+                chosen_seed[target] = seed
+                gold_paths.append({'target': target, 'seed': seed, 'nodes': best_path, 'hops': len(best_path)-1})
+        else:
+            # Teacher is allowed to know the target; inference is not.
+            reverse_dists = distance_to_targets([target], incoming, max_hops=reverse_hops)
+            ancestor_choices = sorted((ranks[node], hop, node) for node, hop in reverse_dists.items()
+                                      if 1 <= hop <= reverse_hops and node in ranks and node not in seeds)
+            for rank, hop, ancestor in ancestor_choices[:1]:
+                paths = shortest_paths(ancestor, target, outgoing, max_hops=reverse_hops, max_paths=8)
+                for path in paths:
+                    oracle_paths.append({'target': target, 'seed': ancestor, 'nodes': path,
+                                         'hops': len(path)-1, 'seed_rank': rank+1,
+                                         'oracle_only': True, 'status': 'teacher_only_not_localization'})
+
+    training_paths = gold_paths if case_type != 'reverse_oracle_probe' else oracle_paths
     gold_edges = {(a, b) for rec in gold_paths for a, b in zip(rec['nodes'], rec['nodes'][1:])}
+    training_edges = {(a, b) for rec in training_paths for a, b in zip(rec['nodes'], rec['nodes'][1:])}
     edge_types = {(e['source'], e['target']): e['type'] for e in edges}
     training = []
-    for a in sorted({start for start, _ in gold_edges}):
+    for a in sorted({start for start, _ in training_edges}):
         # Independent candidate action supervision: all valid shortest-path edges are positives.
-        hop = min((p['nodes'].index(a) for p in gold_paths if a in p['nodes'][:-1]), default=0)
+        hop = min((p['nodes'].index(a) for p in training_paths if a in p['nodes'][:-1]), default=0)
         for candidate in sorted(outgoing[a]):
-            valid = (a, candidate) in gold_edges
+            valid = (a, candidate) in training_edges
             reaches_target = candidate in target_distance
             if valid:
                 label, weight = 1, 1.0
@@ -230,6 +249,7 @@ def build_case(rows, symbols, edges, repo_stats, top_k=20, max_hops=8,
                                                   relevance, ranks, outgoing, incoming,
                                                   top_k, len(ids), max_hops),
                              'label': label, 'sample_weight': weight,
+                             'oracle_only_teacher': case_type == 'reverse_oracle_probe',
                              'teacher_distance': target_distance.get(candidate),
                              'target_quality': 'human_verified' if all(v == 'human_verified'
                                                 for v in candidates.values()) else 'llm_pseudo_mixed',
@@ -237,7 +257,7 @@ def build_case(rows, symbols, edges, repo_stats, top_k=20, max_hops=8,
 
     stop_examples = []
     seen_stops = set()
-    for path in gold_paths:
+    for path in training_paths:
         for hop, node in enumerate(path['nodes']):
             key = (node, hop)
             if key in seen_stops:
@@ -246,6 +266,7 @@ def build_case(rows, symbols, edges, repo_stats, top_k=20, max_hops=8,
             stop_examples.append({'instance_id': first['instance_id'], 'repo': first['repo'],
                                   'base_commit': first['base_commit'], 'query': issue,
                                   'current': node, 'label': int(node in candidates),
+                                  'oracle_only_teacher': case_type == 'reverse_oracle_probe',
                                   'features': features(node, node, hop, None, relevance,
                                                        ranks, outgoing, incoming,
                                                        top_k, len(ids), max_hops),
@@ -286,6 +307,11 @@ def build_case(rows, symbols, edges, repo_stats, top_k=20, max_hops=8,
             'raw_modified_targets': sorted(set(r['positive_id'] for r in rows)),
             'accepted_targets': candidates, 'rejected_targets': rejected_targets,
             'target_quality': status, 'gold_paths': gold_paths,
+            'oracle_paths': oracle_paths,
+            'reported_localization_hops': (0 if case_type == 'direct_retrieval'
+                                           else min((p['hops'] for p in gold_paths), default=None)
+                                           if case_type == 'retrieval_to_target_path' else None),
+            'oracle_best_hops': min((p['hops'] for p in oracle_paths), default=None),
             'gold_nodes': sorted({n for p in gold_paths for n in p['nodes']}),
             'gold_edges': [{'source': a, 'target': b} for a, b in sorted(gold_edges)],
             'target_hops_from_selected_seed': {t: min((x['hops'] for x in gold_paths if x['target'] == t),
@@ -294,8 +320,8 @@ def build_case(rows, symbols, edges, repo_stats, top_k=20, max_hops=8,
             'reverse_probe_top': fallback[:50],
             'deep_hop_probes': deep_hop_probes,
             'reverse_probe_best_rank': fallback[0]['retrieval_rank'] + 1 if fallback else None,
-            'oracle_rescue_used_for_training': case_type == 'reverse_oracle_probe' and bool(rescue_seeds),
-            'oracle_rescue_seed': rescue_seeds[0] if rescue_seeds else None,
+            'oracle_rescue_used_for_training': bool(oracle_paths),
+            'oracle_rescue_seed': oracle_paths[0]['seed'] if oracle_paths else None,
             'oracle_not_available_at_inference': True,
             'seed_scores': sorted_seed_scores,
             'graph_stats': {**repo_stats, 'nodes': len(symbols), 'edges': len(edges)},
@@ -304,7 +330,7 @@ def build_case(rows, symbols, edges, repo_stats, top_k=20, max_hops=8,
 
 
 def build_dataset(input_path, output_dir, benchmark_manifest, checkouts, top_k=20,
-                  max_hops=8, reverse_hops=5, retriever='bm25', store_graphs=False):
+                  max_hops=8, reverse_hops=5, retriever='swerank', store_graphs=False):
     excluded, manifest_sha = read_manifest(benchmark_manifest)
     rows = read_jsonl(input_path)
     groups = defaultdict(list)
