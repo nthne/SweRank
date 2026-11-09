@@ -375,7 +375,7 @@ def main():
     p.add_argument('--top-k', type=int, default=20)
     p.add_argument('--max-hops', type=int, default=8)
     p.add_argument('--reverse-hops', type=int, default=5)
-    p.add_argument('--retriever', choices=['bm25', 'swerank'], default='bm25')
+    p.add_argument('--retriever', choices=['bm25', 'swerank'], default='swerank')
     p.add_argument('--store-graphs', action='store_true')
     args = p.parse_args()
     if min(args.top_k, args.max_hops, args.reverse_hops) < 1:
