@@ -19,39 +19,44 @@ def read_jsonl(path):
 
 
 def summarize(cases, rejected):
+    """Only actual retrieval-seeded paths contribute to localization hops."""
     counts = Counter(c.get('case_type', 'unknown') for c in cases)
     n = len(cases)
-    paths = Counter()
-    best_target_hops = Counter()
-    best_case_hops = Counter()
+    target_hops, issue_hops, oracle_hops, selected_hops = Counter(), Counter(), Counter(), Counter()
     missing = 0
     for c in cases:
-        allpaths = c.get('gold_paths', [])
-        for p in allpaths:
-            paths[str(p['hops'])] += 1
+        kind = c['case_type']
+        paths = c.get('gold_paths', [])
+        assert not (kind == 'reverse_oracle_probe' and paths), 'Case3 must not carry localization paths'
+        assert not (kind == 'direct_retrieval' and any(p['hops'] != 0 for p in paths)), 'Case1 must report zero hop'
         by_target = defaultdict(list)
-        for p in allpaths:
+        for p in paths:
+            selected_hops[str(p['hops'])] += 1
             by_target[p['target']].append(p['hops'])
         for t in c.get('accepted_targets', {}):
             if by_target[t]:
-                best_target_hops[str(min(by_target[t]))] += 1
+                target_hops[str(min(by_target[t]))] += 1
             else:
                 missing += 1
-        available_hops = [min(v) for v in by_target.values() if v]
-        if available_hops:
-            best_case_hops[str(min(available_hops))] += 1
+        if kind == 'direct_retrieval':
+            issue_hops['0'] += 1
+        elif kind == 'retrieval_to_target_path':
+            issue_hops[str(min(p['hops'] for p in paths))] += 1
         else:
-            best_case_hops['unreached'] += 1
+            issue_hops['unreached'] += 1
+            for p in c.get('oracle_paths', []):
+                oracle_hops[str(p['hops'])] += 1
     return {
-        'accepted_issue_count': n,
-        'rejected_issue_count': len(rejected),
+        'accepted_issue_count': n, 'rejected_issue_count': len(rejected),
         'case_distribution': {k: {'count': counts[k], 'percentage': round(100 * counts[k] / n, 2) if n else 0.0}
                               for k in ['direct_retrieval', 'retrieval_to_target_path', 'reverse_oracle_probe']},
-        'hop_distribution_proxy_paths': dict(sorted(paths.items(), key=lambda v: int(v[0]))),
-        'hop_distribution_min_per_target': dict(sorted(best_target_hops.items(), key=lambda v: int(v[0]))),
-        'hop_distribution_min_per_issue': dict(sorted(best_case_hops.items(), key=lambda v: -1 if v[0] == 'unreached' else int(v[0]))),
+        'hop_distribution_proxy_paths': dict(sorted(selected_hops.items(), key=lambda v: int(v[0]))),
+        'hop_distribution_min_per_target': dict(sorted(target_hops.items(), key=lambda v: int(v[0]))),
+        'hop_distribution_min_per_issue': dict(sorted(issue_hops.items(),
+                                                      key=lambda v: -1 if v[0] == 'unreached' else int(v[0]))),
+        'case3_oracle_training_hops': dict(sorted(oracle_hops.items(), key=lambda v: int(v[0]))),
         'unreached_accepted_target_count': missing,
-        'note': 'Proxy graph shortest paths, NOT causally verified path ground truth. In reverse case, path starts from teacher-only oracle rescue; retrieval originally failed.'
+        'note': 'Case1: 0 hops. Case2: shortest retrieval-to-target path. Case3: no localization path, separate oracle-only teacher paths.'
     }
 
 
@@ -136,6 +141,8 @@ def export(cases_path, rejected_path, graph_dir, audit_path, output_dir):
     # the actual retrieval-seeded path distribution or claim these as gold paths.
     deep_rows = []
     for c in cases:
+        if c['case_type'] != 'reverse_oracle_probe':
+            continue
         repo, sha = c['repo'], c['base_commit']
         graph_file = Path(graph_dir) / (repo.replace('/', '__') + '_' + sha[:12] + '.json')
         graph = json.loads(graph_file.read_text(encoding='utf-8')) if graph_file.exists() else {}
@@ -168,6 +175,27 @@ def export(cases_path, rejected_path, graph_dir, audit_path, output_dir):
         writer.writeheader()
         writer.writerows(deep_rows)
     stats = summarize(cases, rejected)
+    # Case3 teacher paths are ONLY exposed in a separate training review,
+    # NEVER as successful issue-localization paths.
+    teacher_rows = []
+    for c in cases:
+        if c['case_type'] != 'reverse_oracle_probe':
+            continue
+        for p in c.get('oracle_paths', []):
+            teacher_rows.append({
+                'instance_id': c['instance_id'], 'issue_url': c.get('issue_url', ''),
+                'repo': c['repo'], 'target': p['target'], 'seed': p['seed'],
+                'seed_rank': p.get('seed_rank'), 'hops': p['hops'],
+                'path_nodes': ' -> '.join(p['nodes']),
+                'oracle_only': True, 'localization_success': False,
+                'manual_review': ''})
+    teacher_fields = ['instance_id','issue_url','repo','target','seed','seed_rank',
+                      'hops','path_nodes','oracle_only','localization_success','manual_review']
+    with (output / 'case3_oracle_training_review.csv').open('w', encoding='utf-8', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=teacher_fields)
+        writer.writeheader()
+        writer.writerows(teacher_rows)
+    stats['case3_oracle_training_paths'] = len(teacher_rows)
     stats['manual_review_rows'] = len(rows)
     stats['deep_hop_diagnostic_paths'] = len(deep_rows)
     stats['deep_hop_distribution'] = dict(sorted(Counter(str(x['hops']) for x in deep_rows).items()))
