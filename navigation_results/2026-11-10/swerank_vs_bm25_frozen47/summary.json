@@ -1,0 +1,126 @@
+{
+  "issues": 47,
+  "targets": 164,
+  "cases": {
+    "bm25": {
+      "direct_retrieval": 33,
+      "retrieval_to_target_path": 2,
+      "reverse_oracle_probe": 12
+    },
+    "swerank": {
+      "direct_retrieval": 36,
+      "retrieval_to_target_path": 3,
+      "reverse_oracle_probe": 8
+    }
+  },
+  "metrics": {
+    "bm25": {
+      "1": {
+        "issue_recall_at_k": 0.361702,
+        "target_recall_at_k": 0.103659,
+        "issue_path_coverage_at_k": 0.425532,
+        "target_path_coverage_at_k": 0.128049,
+        "all_target_issue_path_coverage_at_k": 0.319149,
+        "nontrivial_target_path_coverage_at_k": 0.02439
+      },
+      "5": {
+        "issue_recall_at_k": 0.617021,
+        "target_recall_at_k": 0.237805,
+        "issue_path_coverage_at_k": 0.659574,
+        "target_path_coverage_at_k": 0.323171,
+        "all_target_issue_path_coverage_at_k": 0.468085,
+        "nontrivial_target_path_coverage_at_k": 0.115854
+      },
+      "10": {
+        "issue_recall_at_k": 0.702128,
+        "target_recall_at_k": 0.347561,
+        "issue_path_coverage_at_k": 0.744681,
+        "target_path_coverage_at_k": 0.487805,
+        "all_target_issue_path_coverage_at_k": 0.617021,
+        "nontrivial_target_path_coverage_at_k": 0.213415
+      },
+      "20": {
+        "issue_recall_at_k": 0.808511,
+        "target_recall_at_k": 0.52439,
+        "issue_path_coverage_at_k": 0.808511,
+        "target_path_coverage_at_k": 0.670732,
+        "all_target_issue_path_coverage_at_k": 0.702128,
+        "nontrivial_target_path_coverage_at_k": 0.27439
+      },
+      "50": {
+        "issue_recall_at_k": 0.808511,
+        "target_recall_at_k": 0.780488,
+        "issue_path_coverage_at_k": 0.829787,
+        "target_path_coverage_at_k": 0.878049,
+        "all_target_issue_path_coverage_at_k": 0.765957,
+        "nontrivial_target_path_coverage_at_k": 0.365854
+      }
+    },
+    "swerank": {
+      "1": {
+        "issue_recall_at_k": 0.489362,
+        "target_recall_at_k": 0.140244,
+        "issue_path_coverage_at_k": 0.553191,
+        "target_path_coverage_at_k": 0.170732,
+        "all_target_issue_path_coverage_at_k": 0.425532,
+        "nontrivial_target_path_coverage_at_k": 0.030488
+      },
+      "5": {
+        "issue_recall_at_k": 0.702128,
+        "target_recall_at_k": 0.292683,
+        "issue_path_coverage_at_k": 0.765957,
+        "target_path_coverage_at_k": 0.359756,
+        "all_target_issue_path_coverage_at_k": 0.680851,
+        "nontrivial_target_path_coverage_at_k": 0.121951
+      },
+      "10": {
+        "issue_recall_at_k": 0.765957,
+        "target_recall_at_k": 0.371951,
+        "issue_path_coverage_at_k": 0.829787,
+        "target_path_coverage_at_k": 0.45122,
+        "all_target_issue_path_coverage_at_k": 0.744681,
+        "nontrivial_target_path_coverage_at_k": 0.20122
+      },
+      "20": {
+        "issue_recall_at_k": 0.87234,
+        "target_recall_at_k": 0.481707,
+        "issue_path_coverage_at_k": 0.87234,
+        "target_path_coverage_at_k": 0.536585,
+        "all_target_issue_path_coverage_at_k": 0.808511,
+        "nontrivial_target_path_coverage_at_k": 0.219512
+      },
+      "50": {
+        "issue_recall_at_k": 0.914894,
+        "target_recall_at_k": 0.70122,
+        "issue_path_coverage_at_k": 0.93617,
+        "target_path_coverage_at_k": 0.786585,
+        "all_target_issue_path_coverage_at_k": 0.851064,
+        "nontrivial_target_path_coverage_at_k": 0.335366
+      }
+    }
+  },
+  "hop_distribution_k10": {
+    "bm25": {
+      "0": 57,
+      "unreachable": 84,
+      "1": 13,
+      "2": 7,
+      "3": 2,
+      "4": 1
+    },
+    "swerank": {
+      "0": 61,
+      "unreachable": 90,
+      "1": 9,
+      "2": 3,
+      "3": 1
+    }
+  },
+  "repo_count": 9,
+  "source_run_id": "42153623735",
+  "model": "Salesforce/SweRankEmbed-Small",
+  "labels_frozen": true,
+  "no_llm_calls": true,
+  "manifest_sha256": "66497aa61f87d6f3e22a230516f7a8ff3ab648c9025c3878157a1f60db8d1e33",
+  "caveat": "164 LLM pseudo-target instances, NOT verified gold. Path coverage = reachable within 8 static caller->callee edges from Top-K, includes hop0, excludes oracle fallback."
+}
