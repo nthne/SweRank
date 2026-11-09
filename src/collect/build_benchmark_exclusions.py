@@ -12,10 +12,11 @@ from pathlib import Path
 
 BENCHMARKS = (
     "SWE-bench/SWE-bench",
+    "SWE-bench/SWE-bench_Lite",
+    "SWE-bench/SWE-bench_Verified",
     "SWE-bench/SWE-bench_Multilingual",
     "SWE-bench/SWE-bench_Multimodal",
     "czlll/Loc-Bench_V1",
-    "JetBrains-Research/lca-bug-localization",
 )
 URL_RE = re.compile(r"github\.com/([\w.-]+/[\w.-]+)", re.I)
 NAME_RE = re.compile(r"^([\w.-]+)__([\w.-]+)-\d+$")
@@ -101,7 +102,7 @@ def collect_manifest(datasets=BENCHMARKS, extras=()):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dataset", action="append", help="HF benchmark dataset, repeatable; defaults to five")
+    parser.add_argument("--dataset", action="append", help="HF benchmark dataset, repeatable; defaults to six")
     parser.add_argument("--extra", action="append", default=[], help="Additional JSON or plain-text repo list")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
