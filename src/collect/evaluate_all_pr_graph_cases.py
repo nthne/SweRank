@@ -147,7 +147,18 @@ def run(args):
     if len({x["instance_id"] for x in rankings})!=len(rankings):raise ValueError("Duplicate rankings")
     ranked={x["instance_id"]:x for x in rankings}
     valid=[r for r in gold if "collection_error" not in r and r.get("all_modified_functions")]
-    if not valid:raise ValueError("No valid sample")
+    if not valid:
+        root=Path(args.output);root.mkdir(parents=True,exist_ok=True)
+        for name in ("issue_cases.jsonl","navigation_steps.jsonl","stop_training.jsonl","seed_training.jsonl"):
+            (root/name).write_text("",encoding="utf8")
+        (root/"summary.json").write_text(json.dumps({"issue_pr_samples":0,"cases":{},
+            "excluded_no_modified_function_targets":sum(not r.get("all_modified_functions")
+                   for r in gold if "collection_error" not in r),
+            "reason":"No actual Python function change in selected issue-linked PRs",
+            "no_llm":True},indent=2)+"\n")
+        (root/"manual_target_review.csv").write_text("instance_id,target,case\n")
+        print("No function-level target; preserving zero-target issue-PR as excluded rather than inventing Case3")
+        return
     if any(not r["complete_extraction"] for r in valid):raise ValueError("Partial extraction: abort")
     if set(r["instance_id"] for r in valid)!=set(ranked):raise ValueError("Sample IDs differ")
     root=Path(args.output);root.mkdir(parents=True,exist_ok=True)
