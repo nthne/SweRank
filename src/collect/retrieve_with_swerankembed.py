@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """REAL SweRankEmbed-Small retrieval on *pre-fix* repository functions.
 
-No target labels are passed into retrieval. Every production Python function
+No target labels are passed into retrieval. Every Python function (including test functions)
 available at base_commit is indexed (no oracle candidate reduction). The
 retrieved rankings can be evaluated separately with evaluate_all_pr_targets.py.
 """
@@ -24,9 +24,9 @@ def source_functions(workdir):
     corpus={}
     skipped=[]
     for path in files:
-        if any(part in {"tests","test","testing","__pycache__","venv",".venv"} for part in Path(path).parts):
-            continue
-        if Path(path).name.startswith("test_") or Path(path).name.endswith("_test.py"):
+        # All actual modified functions are targets, including test functions.
+        # Index the same pre-fix source candidates as the call graph.
+        if any(part in {"__pycache__","venv",".venv","site-packages","node_modules","build","dist"} for part in Path(path).parts):
             continue
         try:
             code=(Path(workdir)/path).read_text(encoding="utf-8")
@@ -84,7 +84,7 @@ def retrieve(rows,clone_root,model_name=MODEL_NAME,model=None):
         for i,row in enumerate(items):
             order=np.argsort(-scores[i],kind="stable")
             ranking=[names[j] for j in order]
-            targets=set(row["modified_source_functions"])
+            targets=set(row["all_modified_functions"])
             rankings.append({"instance_id":row["instance_id"],"repo":repo,"base_commit":sha,
                              "model":model_name,"candidate_count":len(names),
                              "ranked_functions":ranking,"target_found_in_index":sorted(targets&set(names)),
