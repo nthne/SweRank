@@ -1,0 +1,152 @@
+name: Strict multi-hop SweRankEmbed crawl (Case2 + Case3)
+on:
+  push:
+    branches: ['feature/issue-graph-navigation-dataset']
+    paths: ['.github/workflows/navigation-strict-deep-crawl.yml']
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: strict-deep-crawl-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Unit tests for navigation and oracle separation
+        run: |
+          python -m unittest discover -s tests -p test_navigation_dataset.py -v
+          python -m unittest discover -s tests -p test_navigation_batch.py -v
+  exclude:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Build both benchmark exclusions (fail closed)
+        run: |
+          python -m pip install 'datasets>=3.6,<5' 'pyarrow>=18,<24'
+          python src/collect/build_benchmark_manifest.py --output benchmark_manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nav-deep-benchmark-manifest
+          path: benchmark_manifest.json
+  crawl:
+    needs: exclude
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - {repo: 'Textualize/rich', slug: 'Textualize__rich'}
+          - {repo: 'pallets/werkzeug', slug: 'pallets__werkzeug'}
+          - {repo: 'simonw/datasette', slug: 'simonw__datasette'}
+          - {repo: 'pallets/itsdangerous', slug: 'pallets__itsdangerous'}
+    env:
+      TARGET_REPO: ${{ matrix.repo }}
+      GITHUB_TOKEN: ${{ github.token }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      TOKENIZERS_PARALLELISM: 'false'
+      OMP_NUM_THREADS: '4'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/download-artifact@v4
+        with:
+          name: nav-deep-benchmark-manifest
+          path: nav_outputs/
+      - name: Exclude SWE-bench and LocBench repositories
+        run: |
+          PYTHONPATH=src/collect python - <<'PY'
+          import os
+          from build_navigation_dataset import read_manifest
+          excluded, digest = read_manifest('nav_outputs/benchmark_manifest.json')
+          if os.environ['TARGET_REPO'].lower() in excluded:
+              raise SystemExit('REJECTED: evaluation repository contamination')
+          print('Allowed:',os.environ['TARGET_REPO'],'manifest:',digest)
+          PY
+      - name: Crawl up to 30 linked merged PRs (new samples)
+        run: |
+          python src/collect/sample_sweloc.py --repo "$TARGET_REPO" --max-prs 30 --allow-no-test --output-dir nav_outputs/audit
+          test -s nav_outputs/audit/sample_sweloc.jsonl
+      - name: Offline LLM label screen — 24 requests max per repo
+        run: |
+          test -n "$OPENAI_API_KEY" || { echo 'OPENAI_API_KEY not configured'; exit 1; }
+          python src/collect/enrich_sweloc.py --input nav_outputs/audit/sample_sweloc.jsonl --output-dir nav_outputs/audit --judge --max-judge-pairs 8 --max-llm-calls 24 --llm-cache nav_outputs/audit/llm_judge_cache.json
+      - name: Install SweRankEmbed CPU dependencies
+        run: |
+          python -m pip install 'einops>=0.8'
+          python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install sentence-transformers==3.4.1 transformers==4.51.3
+      - name: Strict Case1 Case2 Case3 and reverse 2-5-hop search
+        run: |
+          set +e
+          python src/collect/build_navigation_dataset.py --input nav_outputs/audit/enriched_sweloc.jsonl --output-dir nav_outputs/dataset --benchmark-manifest nav_outputs/benchmark_manifest.json --checkout-root .cache/navigation-checkouts --retriever swerank --top-k 10 --max-hops 8 --reverse-hops 5 --store-graphs
+          rc=$?
+          set -e
+          if [[ $rc -ne 0 ]]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          summary=Path('nav_outputs/dataset/summary.json')
+          if not summary.exists() or json.loads(summary.read_text()).get('cases') != 0:
+              raise SystemExit('Unexpected navigation build failure')
+          print('No accepted target survived audit — retaining rejects, no fake positives')
+          PY
+          fi
+      - name: Export strictly separated localization and oracle reviews
+        run: |
+          python src/collect/export_navigation_review.py --cases nav_outputs/dataset/navigation_cases.jsonl --rejected nav_outputs/dataset/rejected_cases.jsonl --graphs nav_outputs/dataset/graphs --audit nav_outputs/audit/enriched_sweloc.jsonl --output-dir nav_outputs/dataset
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nav-deep-${{ matrix.slug }}
+          path: nav_outputs/
+          retention-days: 30
+          if-no-files-found: warn
+  aggregate:
+    if: always() && needs.crawl.result != 'cancelled'
+    needs: crawl
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: nav-deep-*
+          path: deep_artifacts/
+          merge-multiple: false
+      - name: Strictly validate and aggregate four repositories
+        run: |
+          python src/collect/aggregate_strict_deep_crawl.py --artifacts-root deep_artifacts/ --output-dir deep_summary/ --expected-repos 4
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nav-deep-strict-combined-${{ github.run_id }}
+          path: deep_summary/
+          retention-days: 30
+      - name: Commit dataset summary
+        run: |
+          set -euo pipefail
+          OUT=navigation_results/2026-11-10/strict_swerank_deep_crawl
+          mkdir -p "$OUT"
+          cp deep_summary/* "$OUT/"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin feature/issue-graph-navigation-dataset
+          git reset --mixed origin/feature/issue-graph-navigation-dataset
+          git add -f -- "$OUT"
+          if ! git diff --cached --quiet; then
+            git commit -m 'data: strict Case2 Case3 multi-hop SweRank crawl [skip ci]'
+            git push origin HEAD:feature/issue-graph-navigation-dataset
+          fi
