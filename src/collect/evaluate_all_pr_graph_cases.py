@@ -160,7 +160,15 @@ def run(args):
         print("No function-level target; preserving zero-target issue-PR as excluded rather than inventing Case3")
         return
     if any(not r["complete_extraction"] for r in valid):raise ValueError("Partial extraction: abort")
-    if set(r["instance_id"] for r in valid)!=set(ranked):raise ValueError("Sample IDs differ")
+    # PRs that edit only metadata/docs or add module-level code may have no
+    # changed Python function target. The retriever ranks them, but they must
+    # be explicitly excluded from function-localization evaluation.
+    valid_ids={r["instance_id"] for r in valid}
+    ranked_ids=set(ranked)
+    if valid_ids - ranked_ids:
+        raise ValueError("Missing rankings for valid issue-PR IDs: "+str(sorted(valid_ids-ranked_ids)))
+    skipped_empty=[r for r in gold if "collection_error" not in r and not r.get("all_modified_functions")]
+    skipped_errors=[r for r in gold if "collection_error" in r]
     root=Path(args.output);root.mkdir(parents=True,exist_ok=True)
     results=[];all_steps=[];all_stops=[];all_seeds=[]
     graph_cache={}
@@ -205,7 +213,12 @@ def run(args):
         case3_teacher_only_path_hops=cnt_hops("case3_teacher_paths"),
         retrieval="Salesforce/SweRankEmbed-Small",top_k=args.top_k,
         max_hops=args.max_hops,reverse_hops=args.reverse_hops,
-        no_llm=True,all_modified_functions_are_weak_targets=True)
+        no_llm=True,all_modified_functions_are_weak_targets=True,
+        excluded_no_modified_function_targets=len(skipped_empty),
+        excluded_collection_errors=len(skipped_errors),
+        excluded_cases=[{"repo":x.get("repo"),"pr_number":x.get("pr_number"),
+                         "issue_number":x.get("issue_number"),
+                         "reason":"no_modified_python_function_targets"} for x in skipped_empty])
     (root/"summary.json").write_text(json.dumps(summary,indent=2,ensure_ascii=False)+"\n")
     # Full per-target review (all weak functions, even if they did not exist at base commit).
     columns=["instance_id","issue_url","pr_url","repo","case","issue_hops","target","target_kind",
