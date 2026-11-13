@@ -1,0 +1,23 @@
+name: Validate Pair-level Graph Navigation
+on:
+  push:
+    branches: [experiment/all-pr-graph-navigation-no-llm]
+    paths:
+      - 'src/collect/evaluate_all_pr_graph_cases.py'
+      - 'tests/test_all_pr_graph_cases.py'
+      - '.github/workflows/test-target-pairs.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Verify all-modified-function parser and mixed Case1/2/3 pair labeling
+        run: |
+          python -m unittest discover -s tests -p test_collect_all_pr_functions.py -v
+          python -m unittest discover -s tests -p test_all_pr_graph_cases.py -v
+          python -m py_compile src/collect/evaluate_all_pr_graph_cases.py
