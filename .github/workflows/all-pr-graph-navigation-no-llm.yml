@@ -2,7 +2,10 @@ name: Full All Modified Functions Graph Navigation (no LLM)
 on:
   push:
     branches: [experiment/all-pr-graph-navigation-no-llm]
-    paths: ['.github/workflows/all-pr-graph-navigation-no-llm.yml']
+    paths:
+      - '.github/workflows/all-pr-graph-navigation-no-llm.yml'
+      - 'src/collect/evaluate_all_pr_graph_cases.py'
+      - 'docs/TARGET_PAIR_LEVEL_EVALUATION.md'
   workflow_dispatch:
     inputs:
       max_prs:
