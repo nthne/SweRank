@@ -1,0 +1,38 @@
+name: Graph ancestor r-star audit
+on:
+  push:
+    branches:
+      - experiment/all-pr-modified-functions-no-llm
+    paths:
+      - .github/workflows/graph-ancestor-audit.yml
+      - src/collect/evaluate_graph_ancestors.py
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Download exact successful SweRankEmbed ranking artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 42675239030 --repo nthne/SweRank --name real-crawl-diagnostic --dir out
+          test -s out/all_pr_functions.jsonl
+          test -s out/swerankembed_rankings.jsonl
+      - name: Compute base-commit call graphs and 5-hop ancestors
+        run: |
+          python src/collect/evaluate_graph_ancestors.py --gold out/all_pr_functions.jsonl --rankings out/swerankembed_rankings.jsonl --output out/graph_ancestor_evaluation.json --csv out/graph_ancestor_target_ranks.csv
+      - name: Upload reproducible results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: graph-ancestor-rstar-5pr
+          path: out/
+          if-no-files-found: warn

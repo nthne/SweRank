@@ -1,0 +1,43 @@
+name: Real crawl diagnostic
+on:
+  push:
+    branches:
+      - experiment/all-pr-modified-functions-no-llm
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python --version
+      - run: python -m unittest discover -s tests -p test_collect_all_pr_functions.py -v
+      - name: Inspect repository benchmark exclusions
+        run: |
+          python -m pip install datasets==3.6.0 huggingface_hub==0.36.0
+          python src/collect/build_benchmark_exclusions.py --output out/exclusions.json
+      - name: Crawl two merged issue-linked PRs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python src/collect/collect_all_pr_functions.py --exclusions out/exclusions.json --max-prs 5 --repo pypa/packaging --output out/all_pr_functions.jsonl
+      - name: Install SweRankEmbed model
+        run: |
+          python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install sentence-transformers==3.4.1 transformers==4.51.3 einops numpy
+      - name: Retrieve all pre-fix production functions with SweRankEmbed
+        run: |
+          python src/collect/retrieve_with_swerankembed.py --input out/all_pr_functions.jsonl --output out/swerankembed_rankings.jsonl --metadata out/index_metadata.json
+      - name: Evaluate all weak targets
+        run: |
+          python src/collect/evaluate_all_pr_targets.py --gold out/all_pr_functions.jsonl --rankings out/swerankembed_rankings.jsonl --output out/evaluation.json
+      - name: Backup diagnostic artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-crawl-diagnostic
+          path: out/
+          if-no-files-found: warn
