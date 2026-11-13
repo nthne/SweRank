@@ -65,6 +65,21 @@ class TestCases(unittest.TestCase):
         steps,stops,seeds=generate_training(c,self.ranking(["T","Z","B","C","D","U","A"])["ranked_functions"],self.edges)
         self.assertTrue(all("pair_id" in x and "target" in x for x in steps+stops+seeds))
 
+    def test_multiple_equally_short_paths_for_one_target(self):
+        edges=[{"source":"A","target":"B","type":"lexical_call"},
+               {"source":"A","target":"C","type":"lexical_call"},
+               {"source":"B","target":"T","type":"lexical_call"},
+               {"source":"C","target":"T","type":"lexical_call"}]
+        c=analyze_issue(self.row,self.ranking(["A","Z","B","C","D","T","U"]),self.nodes,edges,1,8,5)
+        self.assertEqual(c["target_details"][0]["case"],"case2_forward")
+        self.assertEqual(c["target_details"][0]["best_forward_hops"],2)
+        self.assertEqual(c["target_details"][0]["num_shortest_paths"],2)
+        self.assertEqual({tuple(p["nodes"]) for p in c["localization_paths"]},
+                         {("A","B","T"),("A","C","T")})
+        steps,_,_=generate_training(c,self.ranking(["A","Z","B","C","D","T","U"])["ranked_functions"],edges)
+        first_hops=[s for s in steps if s["current"]=="A"]
+        self.assertEqual({x["candidate"] for x in first_hops if x["label"]==1},{"B","C"})
+
     def test_no_incoming_edge(self):
         row={**self.row,"all_modified_functions":["Z"],"modified_source_functions":["Z"]}
         c=analyze_issue(row,self.ranking(["U","A","B","C","D","T","Z"]),self.nodes,self.edges,1,8,5)
