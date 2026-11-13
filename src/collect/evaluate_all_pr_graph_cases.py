@@ -33,69 +33,80 @@ def best_path(seeds,target,outgoing,order,max_hops):
     if not choices:return None
     h,rank,seed,path=min(choices)
     return dict(target=target,seed=seed,hops=h,nodes=path,seed_rank=rank,oracle_only=False)
-def analyze_issue(row,ranking,nodes,edges,top_k,max_hops,reverse_hops):
-    ordered=ranking["ranked_functions"]; rank={x:i+1 for i,x in enumerate(ordered)}
-    if len(rank)!=len(ordered):raise ValueError("Duplicate rank candidate")
+def best_paths(seeds, target, outgoing, ranks, max_hops, limit=16):
+    """Keep ALL equally-shortest target-specific paths, not one per issue."""
+    found=[]
+    for seed in seeds:
+        for nodes in shortest_paths(seed,target,outgoing,max_hops=max_hops,max_paths=limit):
+            found.append(dict(target=target,seed=seed,seed_rank=ranks[seed],
+                              nodes=nodes,hops=len(nodes)-1,oracle_only=False,
+                              localization_success=True))
+    if not found:return []
+    m=min(p["hops"] for p in found)
+    return sorted((p for p in found if p["hops"]==m),
+                  key=lambda p:(p["seed_rank"],p["seed"],p["nodes"]))[:limit]
+
+
+def analyze_issue(row, ranking, nodes, edges, top_k, max_hops, reverse_hops):
+    ordered=ranking["ranked_functions"]
+    ranks={x:i+1 for i,x in enumerate(ordered)}
+    if len(ranks)!=len(ordered):raise ValueError("Duplicate ranked candidate")
     if set(ordered)!=set(nodes):
-        missing=sorted(set(nodes)-set(ordered))
-        extra=sorted(set(ordered)-set(nodes))
-        raise ValueError(f"Graph/index mismatch: {len(missing)} graph-only, {len(extra)} index-only; examples {missing[:2]}, {extra[:2]}")
-    raw_targets=sorted(set(row["all_modified_functions"]))
-    if not raw_targets:raise ValueError("No changed function for "+row["instance_id"])
+        raise ValueError("Graph/retrieval candidate sets differ. Recreate index on the identical base commit.")
+    targets=sorted(set(row["all_modified_functions"]))
+    if not targets:raise ValueError("No function-level target: "+row["instance_id"])
     seeds=ordered[:top_k]
-    out,inc=adjacency(edges)
-    known=[t for t in raw_targets if t in nodes]
-    direct=set(seeds)&set(known)
-    per_target=[]
-    graph_paths=[]
-    for t in raw_targets:
-        exists=t in nodes
-        p=best_path(seeds,t,out,rank,max_hops) if exists else None
-        if p:graph_paths.append(p)
-        indeg=len(inc[t]) if exists else 0
-        outdeg=len(out[t]) if exists else 0
-        ancestors=(distance_to_targets([t],inc,max_hops=reverse_hops) if exists else {})
-        ancestor_hits=sorted((rank[a],d,a) for a,d in ancestors.items()
-                             if 1<=d<=reverse_hops and a!=t and a in rank)
-        rstar,closest,ancestor=ancestor_hits[0] if ancestor_hits else (None,None,None)
-        per_target.append(dict(target=t,in_base_commit=exists,in_retrieval_index=t in rank,
-           retrieval_rank=rank.get(t),in_degree=indeg,out_degree=outdeg,
-           best_forward_hops=p["hops"] if p else None,
-           best_forward_seed=p["seed"] if p else None,
-           best_ancestor_rank=rstar,best_ancestor_node=ancestor,best_ancestor_hops=closest,
-           ancestor_count_1_to_5=len(ancestor_hits),
-           rank_bucket=bucket(rstar,indeg,exists),
-           target_kind=("test" if t in row.get("modified_test_functions",[]) else "source")))
-    if direct:case="case1_direct";issue_hops=0
-    elif graph_paths:case="case2_forward";issue_hops=min(p["hops"] for p in graph_paths)
-    else:case="case3_no_topk_path";issue_hops=None
-    # Strict reporting: never present any 2..5 hop alternative from Case1 as localization.
-    selected = ([p for p in graph_paths if p["hops"]==0] if case=="case1_direct"
-                else graph_paths if case=="case2_forward" else [])
-    oracle=[]
-    if case=="case3_no_topk_path":
-        for t in per_target:
-            if not t["best_ancestor_node"]:continue
-            for path in shortest_paths(t["best_ancestor_node"],t["target"],out,
-                                       max_hops=reverse_hops,max_paths=5):
-                oracle.append(dict(target=t["target"],seed=t["best_ancestor_node"],
-                  seed_rank=t["best_ancestor_rank"],hops=len(path)-1,nodes=path,
-                  oracle_only=True,localization_success=False))
-    # Target-specific status preserves the truth about incomplete multi-target recovery.
+    outgoing,incoming=adjacency(edges)
+    details, selected_paths, oracle_paths=[],[],[]
+    test_set=set(row.get("modified_test_functions",[]))
+    for target in targets:
+        exists=target in nodes
+        found=best_paths(seeds,target,outgoing,ranks,max_hops) if exists else []
+        dist=found[0]["hops"] if found else None
+        # A function added after the base snapshot is NOT an unreachable target.
+        label=("not_in_base_commit" if not exists else
+               "case1_direct" if dist==0 else
+               "case2_forward" if dist is not None else "case3_no_topk_path")
+        incoming_count=len(incoming[target]) if exists else 0
+        outgoing_count=len(outgoing[target]) if exists else 0
+        ancestor_dists=(distance_to_targets([target],incoming,max_hops=reverse_hops) if exists else {})
+        ancestors=sorted((ranks[anc],length,anc) for anc,length in ancestor_dists.items()
+                         if 1<=length<=reverse_hops and anc!=target and anc in ranks)
+        rstar,ancestor_hops,ancestor=ancestors[0] if ancestors else (None,None,None)
+        if label in ("case1_direct","case2_forward"):
+            selected_paths.extend(found)
+        elif label=="case3_no_topk_path" and ancestor:
+            paths=shortest_paths(ancestor,target,outgoing,max_hops=reverse_hops,max_paths=8)
+            oracle_paths.extend(dict(target=target,seed=ancestor,seed_rank=rstar,
+                nodes=nodes_,hops=len(nodes_)-1,oracle_only=True,
+                localization_success=False) for nodes_ in paths)
+        details.append(dict(target=target,pair_id=row["instance_id"]+"::"+target,
+            case=label,in_base_commit=exists,in_retrieval_index=exists,
+            retrieval_rank=ranks.get(target),
+            target_kind="test" if target in test_set else "source",
+            in_degree=incoming_count,out_degree=outgoing_count,
+            best_forward_hops=dist,best_forward_seed=found[0]["seed"] if found else None,
+            num_shortest_paths=len(found),
+            best_ancestor_rank=rstar,best_ancestor_node=ancestor,
+            best_ancestor_hops=ancestor_hops,ancestor_count_1_to_5=len(ancestors),
+            rank_bucket=bucket(rstar,incoming_count,exists)))
+    counts=Counter(t["case"] for t in details)
+    # An issue is a collection of target-pair samples, never a single Case1/2/3.
     return dict(instance_id=row["instance_id"],repo=row["repo"],issue_id=row.get("issue_id"),
         pr_number=row["pr_number"],pr_url=row["pr_url"],issue_url=row["issue_url"],
-        base_commit=row["base_commit"],query=row["query"],
-        retrieval_method=ranking["model"],retrieval_k=top_k,
-        graph_nodes=len(nodes),graph_edges=len(edges),case=case,
-        issue_localization_hops=issue_hops,all_modified_targets=raw_targets,
+        base_commit=row["base_commit"],query=row["query"],retrieval_method=ranking["model"],
+        retrieval_k=top_k,graph_nodes=len(nodes),graph_edges=len(edges),
+        case="multi_target_issue",issue_localization_hops=None,
+        target_case_counts=dict(counts),all_modified_targets=targets,
         modified_source_functions=row.get("modified_source_functions",[]),
         modified_test_functions=row.get("modified_test_functions",[]),
-        targets_not_in_base=[t for t in raw_targets if t not in nodes],
-        complete_extraction=row["complete_extraction"],
-        top_k_seeds=seeds,target_details=per_target,
-        localization_paths=selected,case3_teacher_paths=oracle,
+        targets_not_in_base=[t for t in targets if t not in nodes],
+        complete_extraction=row["complete_extraction"],top_k_seeds=seeds,
+        target_details=details,localization_paths=selected_paths,
+        case3_teacher_paths=oracle_paths,
         teacher_oracle_never_used_for_inference=True,
         groundtruth_status="all_modified_PR_functions_weak_unverified")
+
 def graph_checkout(repo,sha,dircache):
     import re
     if not re.fullmatch(r"[0-9a-f]{40}",sha):raise ValueError("unsafe commit")
@@ -110,38 +121,60 @@ def graph_checkout(repo,sha,dircache):
         subprocess.run(["git","-C",str(bare),"worktree","add","--quiet","--detach",str(checkout),sha],
                check=True,timeout=400)
     return checkout
-def generate_training(case,ranked,edges):
+def generate_training(issue, ranked, edges):
+    """Every training record is conditioned on ONE (issue, target) pair."""
     ranks={name:i+1 for i,name in enumerate(ranked)}
-    out,inc=adjacency(edges)
-    targets=set(case["all_modified_targets"])
-    known=[t for t in targets if t in ranks]
-    dists=distance_to_targets(known,inc,max_hops=max(1,len(ranks))) if known else {}
-    paths=case["localization_paths"] if case["case"]!="case3_no_topk_path" else case["case3_teacher_paths"]
-    oracle=case["case"]=="case3_no_topk_path"
-    steps=[];stops=[];seeds=[]
-    for seed in case["top_k_seeds"]:
-        if seed in targets:lab=1
-        elif seed in dists:lab=None
-        else:lab=0
-        seeds.append(dict(instance_id=case["instance_id"],node=seed,rank=ranks[seed],
-                          label=lab,teacher_distance=dists.get(seed)))
-    for path in paths:
-        for pos,node in enumerate(path["nodes"]):
-            stops.append(dict(instance_id=case["instance_id"],node=node,hop=pos,
-                             label=int(node in targets),oracle_only_teacher=oracle))
-            if pos+1==len(path["nodes"]):continue
-            true_next=path["nodes"][pos+1]
-            for candidate in sorted(out[node]):
-                target_distance=dists.get(candidate)
-                label=1 if candidate==true_next else None if target_distance is not None else 0
-                steps.append(dict(instance_id=case["instance_id"],current=node,
-                   candidate=candidate,hop=pos,score_features=dict(
-                   rank_fraction=1-ranks[candidate]/max(len(ranks),1),
-                   current_rank_fraction=1-ranks[node]/max(len(ranks),1),
-                   candidate_in_degree=len(inc[candidate]),candidate_out_degree=len(out[candidate]),
-                   hop=pos),label=label,teacher_distance=target_distance,
-                   oracle_only_teacher=oracle))
+    outgoing,incoming=adjacency(edges)
+    steps,stops,seeds=[],[],[]
+    path_index=defaultdict(list)
+    for p in issue["localization_paths"]+issue["case3_teacher_paths"]:
+        path_index[p["target"]].append(p)
+    for target in issue["target_details"]:
+        t=target["target"];case=target["case"]
+        if case=="not_in_base_commit":
+            continue
+        pair_id=target["pair_id"]
+        target_dist=distance_to_targets([t],incoming,max_hops=max(1,len(ranks)))
+        selected_seeds={p["seed"] for p in path_index[t] if not p.get("oracle_only")}
+        for seed in issue["top_k_seeds"]:
+            if seed in selected_seeds:label=1
+            elif seed in target_dist:label=None   # a reachable alternative is not a hard negative
+            else:label=0
+            seeds.append(dict(instance_id=issue["instance_id"],target=t,pair_id=pair_id,
+                pair_case=case,node=seed,rank=ranks[seed],label=label,
+                teacher_distance=target_dist.get(seed)))
+        seen_edges=set();seen_stops=set()
+        for p in path_index[t]:
+            oracle=bool(p["oracle_only"])
+            for i,node in enumerate(p["nodes"]):
+                stop_key=(node,i,oracle)
+                if stop_key not in seen_stops:
+                    stops.append(dict(instance_id=issue["instance_id"],target=t,pair_id=pair_id,
+                        pair_case=case,node=node,hop=i,label=int(node==t),
+                        oracle_only_teacher=oracle))
+                    seen_stops.add(stop_key)
+                if i+1>=len(p["nodes"]):continue
+                current=node
+                # Merge equally-short paths: ALL next nodes on a best path are positive.
+                correct={q["nodes"][i+1] for q in path_index[t]
+                         if len(q["nodes"])>i+1 and q["nodes"][i]==current
+                         and bool(q["oracle_only"])==oracle}
+                for candidate in sorted(outgoing[current]):
+                    key=(current,candidate,i,oracle)
+                    if key in seen_edges:continue
+                    seen_edges.add(key)
+                    label=1 if candidate in correct else None if candidate in target_dist else 0
+                    steps.append(dict(instance_id=issue["instance_id"],target=t,pair_id=pair_id,
+                        pair_case=case,current=current,candidate=candidate,hop=i,
+                        score_features=dict(
+                           rank_fraction=1-ranks[candidate]/max(len(ranks),1),
+                           current_rank_fraction=1-ranks[current]/max(len(ranks),1),
+                           candidate_in_degree=len(incoming[candidate]),
+                           candidate_out_degree=len(outgoing[candidate]),hop=i),
+                        label=label,teacher_distance=target_dist.get(candidate),
+                        oracle_only_teacher=oracle))
     return steps,stops,seeds
+
 def run(args):
     gold=load(args.gold);rankings=load(args.rankings)
     if len({x["instance_id"] for x in rankings})!=len(rankings):raise ValueError("Duplicate rankings")
@@ -184,53 +217,57 @@ def run(args):
             item=analyze_issue(row,ranked[row["instance_id"]],symbols,edges,args.top_k,args.max_hops,args.reverse_hops)
             steps,stops,seeds=generate_training(item,ranked[row["instance_id"]]["ranked_functions"],edges)
             all_steps+=steps;all_stops+=stops;all_seeds+=seeds;results.append(item)
-            print(f"{i+1}/{len(valid)} {row['instance_id']} {item['case']} hops={item['issue_localization_hops']} targets={len(item['all_modified_targets'])}",flush=True)
+            print(f"{i+1}/{len(valid)} {row['instance_id']} pair_cases={item['target_case_counts']} targets={len(item['all_modified_targets'])}",flush=True)
     for name,rows in [("issue_cases.jsonl",results),("navigation_steps.jsonl",all_steps),
                       ("stop_training.jsonl",all_stops),("seed_training.jsonl",all_seeds)]:
         save(root/name,rows)
-    issues=Counter(x["case"] for x in results)
-    target_status=Counter()
-    target_kind=Counter()
-    for x in results:
-        for target in x["target_details"]:
-            target_kind[target["target_kind"]]+=1
-            target_status["not_in_base" if not target["in_base_commit"] else
-                "direct" if target["best_forward_hops"]==0 else
-                "forward_path" if target["best_forward_hops"] else
-                "not_reachable_from_top_k"]+=1
-    def cnt_hops(field):
-        return dict(Counter(str(p["hops"]) for x in results for p in x[field]))
-    buckets=Counter(x["rank_bucket"] for c in results if c["case"]=="case3_no_topk_path"
-                    for x in c["target_details"])
-    case_hops=Counter("unreachable" if x["issue_localization_hops"] is None else
-                      str(x["issue_localization_hops"]) for x in results)
+    all_pairs=[]
+    for issue in results:
+        for t in issue["target_details"]:
+            all_pairs.append(dict(instance_id=issue["instance_id"],issue_url=issue["issue_url"],
+                pr_url=issue["pr_url"],repo=issue["repo"],pr_number=issue["pr_number"],
+                base_commit=issue["base_commit"],**t))
+    save(root/"target_pair_cases.jsonl",all_pairs)
+    path_records=[]
+    for issue in results:
+        for p in issue["localization_paths"]+issue["case3_teacher_paths"]:
+            path_records.append(dict(instance_id=issue["instance_id"],
+                pair_id=issue["instance_id"]+"::"+p["target"],
+                repo=issue["repo"],pair_case=("case3_no_topk_path" if p["oracle_only"]
+                    else "case1_direct" if p["hops"]==0 else "case2_forward"),**p))
+    save(root/"target_pair_paths.jsonl",path_records)
+    counts=Counter(t["case"] for t in all_pairs)
+    kinds=Counter(t["target_kind"] for t in all_pairs)
+    real_hops=Counter(str(t["best_forward_hops"]) for t in all_pairs
+                      if t["case"] in ("case1_direct","case2_forward"))
+    rank_buckets=Counter(t["rank_bucket"] for t in all_pairs if t["case"]=="case3_no_topk_path")
+    case_mix=Counter("+".join(sorted(set(x["target_case_counts"]))) for x in results)
     summary=dict(issue_pr_samples=len(results),repos=sorted(set(x["repo"] for x in results)),
-        weak_modified_targets=sum(len(x["all_modified_targets"]) for x in results),
-        weak_source_targets=target_kind["source"],weak_test_targets=target_kind["test"],
-        cases=dict(issues),issue_localization_hops=dict(case_hops),
-        case3_target_rank_buckets=dict(buckets),target_status=dict(target_status),
-        retrieval_localization_path_hops=cnt_hops("localization_paths"),
-        case3_teacher_only_path_hops=cnt_hops("case3_teacher_paths"),
+        all_modified_target_pairs=len(all_pairs),
+        evaluable_pairs=sum(counts[key] for key in ("case1_direct","case2_forward","case3_no_topk_path")),
+        weak_source_targets=kinds["source"],weak_test_targets=kinds["test"],
+        pair_cases=dict(counts),pair_minimum_forward_hops=dict(real_hops),
+        issue_case_combinations=dict(case_mix),
+        case3_target_rank_buckets=dict(rank_buckets),
+        localization_path_count=sum(len(i["localization_paths"]) for i in results),
+        case3_teacher_only_path_count=sum(len(i["case3_teacher_paths"]) for i in results),
+        step_training_pairs=len(all_steps),seed_training_pairs=len(all_seeds),
+        stop_training_pairs=len(all_stops),
         retrieval="Salesforce/SweRankEmbed-Small",top_k=args.top_k,
         max_hops=args.max_hops,reverse_hops=args.reverse_hops,
-        no_llm=True,all_modified_functions_are_weak_targets=True,
+        sample_unit="issue_pr__target_function",
+        issue_case_is_not_defined=True,no_llm=True,
+        all_modified_functions_are_weak_targets=True,
         excluded_no_modified_function_targets=len(skipped_empty),
-        excluded_collection_errors=len(skipped_errors),
-        excluded_cases=[{"repo":x.get("repo"),"pr_number":x.get("pr_number"),
-                         "issue_number":x.get("issue_number"),
-                         "reason":"no_modified_python_function_targets"} for x in skipped_empty])
+        excluded_collection_errors=len(skipped_errors))
     (root/"summary.json").write_text(json.dumps(summary,indent=2,ensure_ascii=False)+"\n")
-    # Full per-target review (all weak functions, even if they did not exist at base commit).
-    columns=["instance_id","issue_url","pr_url","repo","case","issue_hops","target","target_kind",
-             "in_base_commit","retrieval_rank","best_forward_hops","best_forward_seed",
-             "in_degree","out_degree","best_ancestor_rank","best_ancestor_hops","rank_bucket"]
+    cols=["instance_id","issue_url","pr_url","repo","pr_number","pair_id","target",
+          "case","target_kind","in_base_commit","retrieval_rank","best_forward_hops",
+          "best_forward_seed","num_shortest_paths","in_degree","out_degree",
+          "best_ancestor_rank","best_ancestor_hops","rank_bucket"]
     with (root/"manual_target_review.csv").open("w",newline="",encoding="utf8") as f:
-        w=csv.DictWriter(f,fieldnames=columns);w.writeheader()
-        for c in results:
-            for t in c["target_details"]:
-                w.writerow(dict(instance_id=c["instance_id"],issue_url=c["issue_url"],
-                   pr_url=c["pr_url"],repo=c["repo"],case=c["case"],issue_hops=c["issue_localization_hops"],
-                   **{k:t.get(k) for k in columns[6:]}))
+        w=csv.DictWriter(f,fieldnames=cols);w.writeheader()
+        for t in all_pairs:w.writerow({field:t.get(field) for field in cols})
     print(json.dumps(summary,indent=2),flush=True)
 if __name__=="__main__":
     p=argparse.ArgumentParser()
