@@ -49,7 +49,7 @@ class TestCases(unittest.TestCase):
         self.assertEqual(c["target_details"][0]["case"],"case1_direct")
         self.assertEqual(len(c["target_details"]),3)
         self.assertEqual(c["targets_not_in_base"],["missing_added_test"])
-        self.assertEqual(c["issue_localization_hops"],0)
+        self.assertIsNone(c["issue_localization_hops"])
         self.assertEqual({p["target"] for p in c["localization_paths"]},{"T"})
     def test_multi_target_three_cases_in_one_issue(self):
         # Top1=T, U has incoming Z, B has no incoming in this graph.
@@ -68,7 +68,7 @@ class TestCases(unittest.TestCase):
     def test_no_incoming_edge(self):
         row={**self.row,"all_modified_functions":["Z"],"modified_source_functions":["Z"]}
         c=analyze_issue(row,self.ranking(["U","A","B","C","D","T","Z"]),self.nodes,self.edges,1,8,5)
-        self.assertEqual(c["case"],"case3_no_topk_path")
+        self.assertEqual(c["target_details"][0]["case"],"case3_no_topk_path")
         self.assertEqual(c["target_details"][0]["in_degree"],0)
         self.assertEqual(c["target_details"][0]["rank_bucket"],"no_incoming_edge")
 if __name__=="__main__":unittest.main()
