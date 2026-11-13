@@ -33,12 +33,19 @@ jobs:
     timeout-minutes: 180
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 5
       matrix:
         include:
           - {repo: 'pypa/packaging', slug: 'pypa__packaging'}
           - {repo: 'encode/httpx', slug: 'encode__httpx'}
-          - {repo: 'python-trio/sniffio', slug: 'python-trio__sniffio'}
+          - {repo: 'Textualize/rich', slug: 'Textualize__rich'}
+          - {repo: 'pallets/werkzeug', slug: 'pallets__werkzeug'}
+          - {repo: 'pallets/itsdangerous', slug: 'pallets__itsdangerous'}
+          - {repo: 'simonw/datasette', slug: 'simonw__datasette'}
+          - {repo: 'simonw/sqlite-utils', slug: 'simonw__sqlite-utils'}
+          - {repo: 'agronholm/anyio', slug: 'agronholm__anyio'}
+          - {repo: 'django-commons/django-debug-toolbar', slug: 'django-commons__django-debug-toolbar'}
+          - {repo: 'fastapi/fastapi', slug: 'fastapi__fastapi'}
     env:
       GITHUB_TOKEN: ${{ github.token }}
       TOKENIZERS_PARALLELISM: 'false'
