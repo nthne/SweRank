@@ -13,7 +13,7 @@ import tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from sample_sweloc import api, pages, FIX
+from sample_sweloc import api, pages, FIXES
 from collect_all_pr_functions import source_at, spans, diff_lines
 from navigation_graph import collect_repo, swerank_rank, adjacency, shortest_paths, distance_to_targets
 
@@ -57,7 +57,7 @@ def single_root(files, before_fn, after_fn):
 
 def fixing_issues(pr, repo):
     result=set()
-    for m in FIX.finditer(pr.get("body") or ""):
+    for m in FIXES.finditer(pr.get("body") or ""):
         if not m.group(1) or m.group(1).lower()==repo.lower():
             result.add(int(m.group(2)))
     return sorted(result)
