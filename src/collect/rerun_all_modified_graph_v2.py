@@ -45,8 +45,12 @@ def check_baseline(gold,rankings,pairs):
         missing=sorted(expected-set(original))[:5]
         extra=sorted(set(original)-expected)[:5]
         raise ValueError("Frozen pair mismatch: missing="+str(missing)+" extra="+str(extra))
-    if set(x["instance_id"] for x in valid)!=set(rankmap):
-        raise ValueError("Frozen rankings do not match issue sample IDs")
+    # Retrieval may include issue-PR rows with no modified function target.
+    # Such rankings legitimately have no evaluable issue-function pair.
+    required=set(x["instance_id"] for x in valid)
+    missing=required-set(rankmap)
+    if missing:
+        raise ValueError("Missing frozen rankings: "+str(sorted(missing)))
     for x in valid:
         rank=rankmap[x["instance_id"]]
         if x["base_commit"]!=rank["base_commit"] or x["repo"]!=rank["repo"]:
