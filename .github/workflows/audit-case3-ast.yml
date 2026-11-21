@@ -1,0 +1,80 @@
+name: Audit 15 Case3 AST call resolution
+on:
+  push:
+    branches: [feature/et1-single-root-100repos]
+    paths:
+      - '.github/workflows/audit-case3-ast.yml'
+      - 'src/collect/audit_case3_ast_resolution.py'
+      - 'datasets/et1_case3_no_incoming_15.jsonl'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0,1,2,3,4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Audit 3 targets from old ET1 snapshot
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python src/collect/audit_case3_ast_resolution.py \
+            --input datasets/et1_case3_no_incoming_15.jsonl \
+            --output "out/shard-${SHARD}" \
+            --shard-index "${SHARD}" --shard-count 5
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: case3-ast-audit-shard-${{ matrix.shard }}
+          path: out/
+          retention-days: 30
+  summarize:
+    if: always()
+    needs: audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: case3-ast-audit-shard-*
+          path: gathered
+      - name: Combine evidence
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+          root=Path("gathered")
+          rows=[];failures=[];shards=[]
+          for p in sorted(root.glob("*/**/audited.jsonl")):
+              rows.extend(json.loads(s) for s in p.read_text().splitlines() if s.strip())
+          for p in sorted(root.glob("*/**/failures.jsonl")):
+              failures.extend(json.loads(s) for s in p.read_text().splitlines() if s.strip())
+          for p in sorted(root.glob("*/**/summary.json")):
+              shards.append(json.loads(p.read_text()))
+          Path("combined").mkdir(exist_ok=True)
+          for name,items in [("case3_ast_evidence.jsonl",rows),("case3_ast_errors.jsonl",failures)]:
+              Path("combined",name).write_text("".join(json.dumps(x,ensure_ascii=False)+"\n" for x in items))
+          report={
+            "shards":len(shards),"audited":len(rows),"errors":len(failures),
+            "old_zero_in_degree":sum(x["original_graph_incoming"]==0 for x in rows),
+            "hypotheses":dict(Counter(x["hypothesis"] for x in rows)),
+            "parse_failures":sum(x["audit_parse_failures"] for x in rows),
+            "evidence_counts":dict(sum((Counter(x["evidence_count"]) for x in rows),Counter()))
+          }
+          Path("combined/summary.json").write_text(json.dumps(report,indent=2)+"\n")
+          print("AST_AUDIT_AGGREGATE",json.dumps(report))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: et1-case3-ast-audit-combined
+          path: combined/
+          retention-days: 30
