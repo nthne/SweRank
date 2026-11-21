@@ -36,8 +36,12 @@ def case_for_issue(row, old, symbols, edges, stats, top_k, max_hops, full_rstar)
     topk=[x["function"] for x in old.get("retrieved_topk",[])[:top_k]]
     # These rankings were actually computed with Salesforce/SweRankEmbed-Small
     # from pre-fix code, not oracle target labels.
-    if len(topk)!=top_k:
-        raise ValueError("Frozen top-k is incomplete: "+row["instance_id"])
+    # A tiny repository can have fewer functions than the requested top-k.
+    # Preserve its complete frozen ranking instead of rejecting valid samples.
+    expected=min(top_k, old.get("index_size", len(symbols)))
+    if not topk or len(topk)!=expected:
+        raise ValueError("Frozen top-k length mismatch: "+row["instance_id"]+
+                         " expected "+str(expected)+" got "+str(len(topk)))
     if target not in symbols:
         return dict(case="target_missing_in_base",paths=[],selected_path=None,
                     selected_nontrivial_hops=None,best_ancestor_bin="not_in_base_commit",
