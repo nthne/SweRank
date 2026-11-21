@@ -1,0 +1,152 @@
+name: Compare Variant B multi-root 10 repos — Graph V1 vs V2
+
+on:
+  push:
+    branches: [feature/et1-single-root-100repos]
+    paths:
+      - '.github/workflows/rerun-all-modified-graph-v2.yml'
+      - 'src/collect/rerun_all_modified_graph_v2.py'
+      - 'src/collect/typed_call_graph.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - run: |
+          python -m unittest discover -s tests -p test_typed_call_graph.py -v
+          python -m unittest discover -s tests -p test_all_pr_graph_cases.py -v
+          python -m py_compile src/collect/rerun_all_modified_graph_v2.py
+
+  compare:
+    needs: tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        include:
+          - {repo: 'pypa/packaging', slug: 'pypa__packaging'}
+          - {repo: 'encode/httpx', slug: 'encode__httpx'}
+          - {repo: 'Textualize/rich', slug: 'Textualize__rich'}
+          - {repo: 'pallets/werkzeug', slug: 'pallets__werkzeug'}
+          - {repo: 'pallets/itsdangerous', slug: 'pallets__itsdangerous'}
+          - {repo: 'simonw/datasette', slug: 'simonw__datasette'}
+          - {repo: 'simonw/sqlite-utils', slug: 'simonw__sqlite-utils'}
+          - {repo: 'agronholm/anyio', slug: 'agronholm__anyio'}
+          - {repo: 'django-commons/django-debug-toolbar', slug: 'django-commons__django-debug-toolbar'}
+          - {repo: 'fastapi/fastapi', slug: 'fastapi__fastapi'}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.11'}
+      - name: Download original November 13 Variant B artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: all-modified-graph-${{ matrix.slug }}
+          github-token: ${{ github.token }}
+          run-id: 43429328863
+          path: baseline/
+      - name: Recompute AST graph only — frozen SweRankEmbed rankings
+        env:
+          TARGET_REPO: ${{ matrix.repo }}
+        run: |
+          python src/collect/rerun_all_modified_graph_v2.py \
+            --input baseline \
+            --output out/graph-v2 \
+            --top-k 10 --max-hops 8 --reverse-hops 5
+      - name: Verify pair counts and immutable target ranks
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          def jl(path):
+              return [json.loads(x) for x in Path(path).read_text().splitlines() if x.strip()]
+          before=jl('baseline/graph_navigation/target_pair_cases.jsonl')
+          after=jl('out/graph-v2/target_pair_comparison.jsonl')
+          assert len(before)==len(after), (len(before),len(after))
+          a={x['pair_id']:x for x in before}
+          b={x['pair_id']:x for x in after}
+          assert a.keys()==b.keys()
+          for k in a:
+              assert a[k]['case']==b[k]['original_case']
+              assert a[k]['retrieval_rank']==b[k]['retrieval_rank']
+          print('VERIFIED_PAIR_COUNT',len(before))
+          PY
+      - name: Upload V2 comparison and path evidence
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: variant-b-graph-v2-${{ matrix.slug }}
+          path: out/graph-v2
+          retention-days: 30
+          if-no-files-found: warn
+
+  aggregate:
+    needs: compare
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: variant-b-graph-v2-*
+          path: shard-results
+      - name: Aggregate pair-level Case1/2/3 transitions
+        run: |
+          python - <<'PY'
+          import json
+          from collections import Counter
+          from pathlib import Path
+          r=Path('shard-results')
+          summaries=[json.loads(p.read_text()) for p in sorted(r.glob('*/summary.json'))]
+          pairs=[]
+          for p in sorted(r.glob('*/target_pair_comparison.jsonl')):
+              pairs.extend(json.loads(s) for s in p.read_text().splitlines() if s.strip())
+          before=Counter(x['original_case'] for x in pairs)
+          after=Counter(x['v2_case'] for x in pairs)
+          transitions=Counter(x['transition'] for x in pairs)
+          hops=Counter(str(x['v2_forward_hops']) for x in pairs if x['v2_case'] in ('case1_direct','case2_forward'))
+          c3_no_in_before=sum(x['original_case']=='case3_no_topk_path' and not x['original_incoming_edges'] for x in pairs)
+          c3_no_in_after=sum(x['v2_case']=='case3_no_topk_path' and not x['v2_incoming_edges'] for x in pairs)
+          by_repo={x['repo']:{
+               'pairs':x['all_modified_target_pairs'],
+               'old_case3':x['original_case3'],'v2_case3':x['v2_case3'],
+               'old_no_incoming':x['original_case3_no_incoming'],
+               'v2_no_incoming':x['v2_case3_no_incoming'],
+               'new_edge_types':x['new_edge_type_occurrences'],
+             } for x in summaries}
+          report={
+            'status':'completed' if len(summaries)==10 and len(pairs)==719 else 'INCOMPLETE',
+            'completed_repos':len(summaries),
+            'issue_pr_samples':sum(x['issue_pr_samples'] for x in summaries),
+            'target_pairs':len(pairs),
+            'evaluable_pairs':sum(after[k] for k in ('case1_direct','case2_forward','case3_no_topk_path')),
+            'old_cases':dict(before),'v2_cases':dict(after),
+            'transitions':dict(transitions),
+            'old_case3_no_incoming':c3_no_in_before,
+            'v2_case3_no_incoming':c3_no_in_after,
+            'v2_forward_hops':dict(hops),
+            'by_repo':by_repo,
+            'model':'Salesforce/SweRankEmbed-Small — frozen ranking',
+            'no_llm_target_filter':True,
+            'max_hops':8,
+            'note':'static graph candidates; not validated causal runtime traces',
+          }
+          out=Path('combined');out.mkdir(exist_ok=True)
+          (out/'overall_summary.json').write_text(json.dumps(report,indent=2,ensure_ascii=False)+'\n')
+          (out/'target_pair_comparison.jsonl').write_text(''.join(json.dumps(x,ensure_ascii=False)+'\n' for x in pairs))
+          print('VARIANT_B_V2_AGGREGATE',json.dumps(report,ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: variant-b-10repo-graph-v2-combined
+          path: combined
+          retention-days: 30
