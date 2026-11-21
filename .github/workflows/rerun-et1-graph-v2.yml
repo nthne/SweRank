@@ -1,0 +1,157 @@
+name: Verify and rerun 198 ET1 samples with Typed Graph V2
+
+on:
+  push:
+    branches: [feature/et1-single-root-100repos]
+    paths:
+      - '.github/workflows/rerun-et1-graph-v2.yml'
+      - 'src/collect/typed_call_graph.py'
+      - 'src/collect/rerun_et1_graph_v2.py'
+      - 'tests/test_typed_call_graph.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run graph and filtering tests
+        run: |
+          python -m unittest discover -s tests -p 'test_typed_call_graph.py' -v
+          python -m unittest discover -s tests -p 'test_et1_single_root_paths.py' -v
+          python -m unittest discover -s tests -p 'test_all_pr_graph_cases.py' -v
+
+  frozen_data:
+    needs: tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: et1-combined-100repo-results
+          github-token: ${{ github.token }}
+          run-id: 44733396537
+          path: out/frozen
+      - name: Assert frozen benchmark identity
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root=Path('out/frozen')
+          issues=[json.loads(x) for x in (root/'issues_single_root.jsonl').read_text().splitlines() if x]
+          prev=[json.loads(x) for x in (root/'et1_path_candidates.jsonl').read_text().splitlines() if x]
+          assert len(issues)==len(prev)==198
+          assert len(set(x['instance_id'] for x in issues))==198
+          print('Frozen original SweRankEmbed samples:',len(issues))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: et1-v2-frozen-input
+          path: out/frozen
+          retention-days: 30
+
+  rerun:
+    needs: frozen_data
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      max-parallel: 5
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9]
+    env:
+      TOKENIZERS_PARALLELISM: 'false'
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      OMP_NUM_THREADS: '4'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: et1-v2-frozen-input
+          path: out/frozen
+      - name: Install real SweRankEmbed CPU runtime for full r-star computation
+        run: |
+          python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install sentence-transformers==3.4.1 transformers==4.51.3 einops numpy
+      - name: Rerun same historical commits with V2 graph and original top-10
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          python src/collect/rerun_et1_graph_v2.py \
+            --issues out/frozen/issues_single_root.jsonl \
+            --previous out/frozen/et1_path_candidates.jsonl \
+            --output "out/graph-v2-shard-${SHARD}" \
+            --shard-index "${SHARD}" --shard-count 10 \
+            --top-k 10 --max-hops 5 --full-rstar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: et1-v2-shard-${{ matrix.shard }}
+          path: out/graph-v2-shard-${{ matrix.shard }}
+          retention-days: 30
+          if-no-files-found: warn
+
+  compare:
+    needs: rerun
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: et1-v2-shard-*
+          path: out/shards
+      - name: Compare 198 frozen samples and transitions
+        run: |
+          python - <<'PY'
+          from collections import Counter
+          import json
+          from pathlib import Path
+          root=Path('out/shards')
+          summaries=[json.loads(p.read_text()) for p in sorted(root.glob('*/summary.json'))]
+          entries=[]
+          errors=[]
+          for p in sorted(root.glob('*/results.jsonl')):
+              entries += [json.loads(x) for x in p.read_text().splitlines() if x]
+          for p in sorted(root.glob('*/errors.jsonl')):
+              errors += [json.loads(x) for x in p.read_text().splitlines() if x]
+          cases=Counter(x['case'] for x in entries)
+          transitions=Counter(x['previous_case']+' -> '+x['case'] for x in entries)
+          bins=Counter(x['best_ancestor_bin'] for x in entries if x['case']=='case3_no_topk_path')
+          hops=Counter(str(x['selected_nontrivial_hops']) for x in entries if x.get('selected_nontrivial_hops') is not None)
+          case2_hops=Counter(str(x['selected_nontrivial_hops']) for x in entries if x['case']=='case2_forward')
+          out=Path('out/combined')
+          out.mkdir(parents=True,exist_ok=True)
+          report={
+            'shards_completed':len(summaries),
+            'samples_evaluated':len(entries),
+            'revision_failures':len(errors),
+            'status':'complete' if len(summaries)==10 and len(entries)==198 and not errors else 'incomplete',
+            'original_cases':dict(Counter(x['previous_case'] for x in entries)),
+            'v2_cases':dict(cases),
+            'case_transitions':dict(transitions),
+            'case2_hops':dict(case2_hops),
+            'all_nontrivial_hops':dict(hops),
+            'case3_ancestor_rank_bins':dict(bins),
+            'same_frozen_retriever_top10':True,
+            'new_graph':'type-aware static graph v2',
+            'path_type':'static_proxy_not_proven_causal',
+          }
+          (out/'overall_summary.json').write_text(json.dumps(report,indent=2)+'\n')
+          (out/'compare_198.jsonl').write_text(''.join(json.dumps(x,ensure_ascii=False)+'\n' for x in entries))
+          (out/'failures.jsonl').write_text(''.join(json.dumps(x,ensure_ascii=False)+'\n' for x in errors))
+          print('ET1_V2_COMPARISON',json.dumps(report))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: et1-v2-comparison-198
+          path: out/combined/
+          retention-days: 30
