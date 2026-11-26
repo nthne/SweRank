@@ -1,0 +1,86 @@
+name: Audit SweRankEmbed-Small query token budget
+on:
+  push:
+    branches: [experiment/swerank-token-limit-audit]
+    paths: ['.github/workflows/audit-swerank-token-budget.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install tokenizer runtime (no model weights)
+        run: python -m pip install 'transformers==4.51.3' 'huggingface_hub>=0.25,<2'
+      - name: Audit actual tokenizer lengths from live GitHub issue
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          from urllib.request import urlopen, Request
+          from transformers import AutoTokenizer
+          from huggingface_hub import hf_hub_download
+          name="Salesforce/SweRankEmbed-Small"
+          tok=AutoTokenizer.from_pretrained(name,trust_remote_code=True)
+          req=Request("https://api.github.com/repos/ansible/molecule/issues/4689",headers={
+            "Accept":"application/vnd.github+json","User-Agent":"SweRank-token-budget-research"})
+          with urlopen(req,timeout=60) as fp:issue=json.load(fp)
+          query=(issue['title']+"\n"+(issue['body'] or "")).strip()
+          cfg={}
+          for config in ["sentence_bert_config.json","config_sentence_transformers.json",
+                         "config.json","tokenizer_config.json"]:
+              try:
+                  cfg[config]=json.loads(Path(hf_hub_download(name,config)).read_text())
+              except Exception as e:
+                  cfg[config]={"error":str(e)[:150]}
+          prompt=cfg["config_sentence_transformers.json"].get("prompts",{}).get("query","")
+          def count(s):return len(tok(prompt+s,add_special_tokens=True,truncation=False)["input_ids"])
+          probes={}
+          for k,s in {
+            "title":issue['title'],
+            "first_3000_chars":query[:3000],
+            "full_issue":query,
+            "issue_first_1000":query[:1000],
+            "issue_first_4000":query[:4000]
+          }.items():
+              probes[k]={"characters":len(s),"tokens_with_prompt_special":count(s),
+                         "characters_per_token":round(len(s)/count(s),3)}
+          repeated=(query+"\n")*45
+          thresholds={}
+          for budget in [512,1024,2048,4096,8192]:
+              lo=0;hi=len(repeated)
+              while lo<hi:
+                  mid=(lo+hi+1)//2
+                  if count(repeated[:mid])<=budget:lo=mid
+                  else:hi=mid-1
+              thresholds[str(budget)]={"repeated_issue_characters":lo,"tokens":count(repeated[:lo])}
+          positions={"change_state":query.find("change_state"),
+                     "State.change_state":query.find("State.change_state"),
+                     "_write_state_file":query.find("_write_state_file")}
+          result={
+              "model":name,"source_issue":"https://github.com/ansible/molecule/issues/4689",
+              "issue_length":len(query),"issue_char_positions_zero_based":positions,
+              "tokenizer_class":tok.__class__.__name__,"tokenizer_model_max_length":tok.model_max_length,
+              "sentence_transformer_max_seq_length":cfg["sentence_bert_config.json"].get("max_seq_length"),
+              "config_max_position_embeddings":cfg["config.json"].get("max_position_embeddings"),
+              "query_prompt":prompt,"prompt_special_tokens":count(""),
+              "measurements":probes,"issue_repeated_to_token_budget":thresholds,
+              "extra_config":cfg["tokenizer_config.json"].get("model_max_length"),
+              "important_note":"equivalent character count depends on actual tokenizer and text; repeated-issue probes are not general limits"
+          }
+          print("TOKEN_LIMIT_AUDIT_RESULT",json.dumps(result))
+          Path("token_budget_audit.json").write_text(json.dumps(result,indent=2,ensure_ascii=False)+"\n")
+          assert result["sentence_transformer_max_seq_length"] == 8192
+          assert probes["first_3000_chars"]["tokens_with_prompt_special"] < 8192
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: token-budget-issue-4689
+          path: token_budget_audit.json
+          retention-days: 30
