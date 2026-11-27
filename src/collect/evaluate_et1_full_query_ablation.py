@@ -42,8 +42,12 @@ def retrieve_pair(model, symbols, query):
     documents=[symbols[k].path+"\n"+symbols[k].qualname+"\n"+symbols[k].source for k in ids]
     doc_vec=np.asarray(model.encode(documents,batch_size=16,
                                     normalize_embeddings=True,show_progress_bar=False))
-    query_vec=np.asarray(model.encode([query[:3000],query],prompt_name="query",
-                                      normalize_embeddings=True,show_progress_bar=False))
+    # Encode separately to avoid padding the short query to the full query length.
+    short_vec=model.encode([query[:3000]],prompt_name="query",batch_size=1,
+                           normalize_embeddings=True,show_progress_bar=False)[0]
+    full_vec=model.encode([query],prompt_name="query",batch_size=1,
+                          normalize_embeddings=True,show_progress_bar=False)[0]
+    query_vec=np.asarray([short_vec,full_vec])
     old_rank=ordered_rank(ids,doc_vec@query_vec[0])
     full_rank=ordered_rank(ids,doc_vec@query_vec[1])
     return old_rank,full_rank
